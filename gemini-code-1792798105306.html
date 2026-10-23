@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Secure Messenger Mobile</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    /* Empêche le rebond du scroll sur iOS */
+    body {
+      touch-action: manipulation;
+    }
+    /* Hauteur dynamique pour mobiles (évite la barre d'adresse Safari/Chrome) */
+    .h-dvh {
+      height: 100dvh;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 h-dvh flex flex-col font-sans overflow-hidden select-none">
+
+  <!-- Modal Connexion / Inscription -->
+  <div id="auth-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-800 shadow-2xl w-full max-w-sm">
+      <div class="text-center mb-6">
+        <div class="w-16 h-16 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-3 border border-emerald-500/20">
+          <i class="fa-solid fa-shield-halved text-3xl"></i>
+        </div>
+        <h2 id="auth-title" class="text-2xl font-bold">Connexion</h2>
+        <p class="text-slate-400 text-xs mt-1">Messagerie privée E2EE</p>
+      </div>
+
+      <form onsubmit="handleAuth(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs text-slate-400 uppercase tracking-wider font-semibold mb-1.5 pl-1">Pseudo</label>
+          <input type="text" id="auth-user" required placeholder="ex: alice" 
+            class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 text-base">
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 uppercase tracking-wider font-semibold mb-1.5 pl-1">Mot de passe</label>
+          <input type="password" id="auth-pass" required placeholder="••••••••" 
+            class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 text-base">
+        </div>
+        
+        <button type="submit" id="auth-btn"
+          class="w-full bg-emerald-600 active:bg-emerald-700 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-base mt-2">
+          Se connecter
+        </button>
+      </form>
+
+      <div class="mt-5 text-center">
+        <button onclick="toggleAuthMode()" id="auth-switch-btn" class="text-xs text-emerald-400 font-medium active:opacity-70 py-1">
+          Pas encore de compte ? S'inscrire
+        </button>
+      </div>
+      <div id="auth-status" class="mt-3 text-xs text-center text-amber-400 font-medium"></div>
+    </div>
+  </div>
+
+  <!-- Conteneur Principal -->
+  <div class="flex-1 flex w-full h-full relative overflow-hidden">
+    
+    <!-- ECRAN 1 : Sidebar (Contacts) -->
+    <aside id="view-contacts" class="w-full md:w-80 bg-slate-900 border-r border-slate-800/80 flex flex-col h-full absolute md:relative z-10 transition-transform duration-300">
+      <!-- En-tête Utilisateur -->
+      <div class="p-4 bg-slate-900/80 border-b border-slate-800/80 flex justify-between items-center backdrop-blur-sm pt-safe">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold border border-emerald-500/30">
+            <i class="fa-solid fa-user"></i>
+          </div>
+          <div>
+            <div id="my-username" class="font-bold text-slate-100 text-base leading-tight">Mon Compte</div>
+            <div class="text-[11px] text-emerald-400 flex items-center gap-1 font-medium">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> En ligne
+            </div>
+          </div>
+        </div>
+        <button onclick="logout()" title="Se déconnecter" class="w-10 h-10 text-slate-400 active:text-red-400 rounded-xl active:bg-slate-800 flex items-center justify-center">
+          <i class="fa-solid fa-power-off text-lg"></i>
+        </button>
+      </div>
+
+      <!-- Ajouter un contact -->
+      <div class="p-3 bg-slate-950/40 border-b border-slate-800/80">
+        <div class="flex gap-2">
+          <input type="text" id="new-contact" placeholder="Ajouter un pseudo..." 
+            class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-emerald-500 placeholder:text-slate-600">
+          <button onclick="addContact()" class="bg-emerald-600 active:bg-emerald-700 text-white w-10 h-10 rounded-xl flex items-center justify-center shadow-md">
+            <i class="fa-solid fa-plus text-base"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Liste des contacts -->
+      <div class="flex-1 overflow-y-auto p-2 space-y-1 divide-y divide-slate-800/30" id="contacts-list"></div>
+    </aside>
+
+    <!-- ECRAN 2 : Zone de Chat -->
+    <main id="view-chat" class="w-full flex-1 flex flex-col bg-slate-950 h-full absolute md:relative z-20 translate-x-full md:translate-x-0 transition-transform duration-300">
+      
+      <!-- En-tête du Chat -->
+      <header class="h-16 border-b border-slate-800/80 flex items-center justify-between px-4 bg-slate-900/90 backdrop-blur-md pt-safe">
+        <div class="flex items-center gap-3">
+          <button onclick="showContactsView()" class="md:hidden w-10 h-10 -ml-2 text-slate-300 active:text-white active:bg-slate-800 rounded-xl flex items-center justify-center">
+            <i class="fa-solid fa-chevron-left text-lg"></i>
+          </button>
+          <div>
+            <h3 id="active-chat-name" class="font-bold text-base text-slate-100">Sélectionnez un contact</h3>
+            <p id="chat-status-text" class="text-[11px] text-slate-500 font-medium">Chiffrement de bout en bout</p>
+          </div>
+        </div>
+      </header>
+
+      <!-- Messages -->
+      <div id="messages-container" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-950"></div>
+
+      <!-- Bar d'envoi du message -->
+      <form id="message-form" onsubmit="sendMessage(event)" class="p-3 bg-slate-900/90 border-t border-slate-800/80 flex gap-2 items-center pb-safe">
+        <input type="text" id="message-input" disabled placeholder="Saisissez votre message..." 
+          class="flex-1 bg-slate-950 border border-slate-800 rounded-2xl px-4 py-3 text-base focus:outline-none focus:border-emerald-500 disabled:opacity-40 placeholder:text-slate-600">
+        <button type="submit" id="send-btn" disabled 
+          class="w-12 h-12 bg-emerald-600 active:bg-emerald-700 text-white rounded-2xl flex items-center justify-center disabled:opacity-40 shadow-lg shadow-emerald-950">
+          <i class="fa-solid fa-paper-plane text-base"></i>
+        </button>
+      </form>
+    </main>
+
+  </div>
+
+  <script>
+    const SERVER_URL = "https://chat-serveur.onrender.com"; 
+
+    let socket = null;
+    let currentUser = "";
+    let currentPassword = "";
+    let activeContact = null;
+    let isRegisterMode = false;
+    const contacts = JSON.parse(localStorage.getItem('chat_contacts') || '[]');
+    const chatHistory = JSON.parse(localStorage.getItem('chat_history') || '{}');
+
+    // Keep-alive Render
+    setInterval(() => {
+      fetch(`${SERVER_URL}/ping`).catch(() => {});
+    }, 4 * 60 * 1000);
+
+    // Gestion de la navigation mobile (Contacts <-> Chat)
+    function showChatView() {
+      if (window.innerWidth < 768) {
+        document.getElementById('view-chat').classList.remove('translate-x-full');
+      }
+    }
+
+    function showContactsView() {
+      if (window.innerWidth < 768) {
+        document.getElementById('view-chat').classList.add('translate-x-full');
+      }
+    }
+
+    function toggleAuthMode() {
+      isRegisterMode = !isRegisterMode;
+      document.getElementById('auth-title').innerText = isRegisterMode ? "Créer un compte" : "Connexion";
+      document.getElementById('auth-btn').innerText = isRegisterMode ? "S'inscrire" : "Se connecter";
+      document.getElementById('auth-switch-btn').innerText = isRegisterMode ? "Déjà un compte ? Se connecter" : "Pas encore de compte ? S'inscrire";
+    }
+
+    async function hashPassword(password) {
+      const msgBuffer = new TextEncoder().encode(password);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function handleAuth(e) {
+      e.preventDefault();
+      const user = document.getElementById('auth-user').value.trim().toLowerCase();
+      const pass = document.getElementById('auth-pass').value;
+      const statusEl = document.getElementById('auth-status');
+
+      statusEl.innerText = "Connexion en cours...";
+      const passwordHash = await hashPassword(pass);
+      currentUser = user;
+      currentPassword = pass;
+
+      socket = io(SERVER_URL);
+
+      socket.on('connect', () => {
+        const eventName = isRegisterMode ? 'register' : 'login';
+        socket.emit(eventName, { username: user, passwordHash }, async (response) => {
+          if (response.success) {
+            document.getElementById('auth-modal').classList.add('hidden');
+            document.getElementById('my-username').innerText = user;
+            renderContacts();
+            
+            if (response.messages) {
+              for (const msgData of response.messages) {
+                await processIncomingMessage(msgData);
+              }
+            }
+          } else {
+            statusEl.innerText = response.message;
+            socket.disconnect();
+          }
+        });
+      });
+
+      socket.on('new-message', async (msgData) => {
+        await processIncomingMessage(msgData);
+      });
+    }
+
+    async function processIncomingMessage(msgData) {
+      const decrypted = await decryptMessage(msgData.encryptedPayload, currentPassword);
+      const sender = msgData.sender;
+
+      if (!contacts.includes(sender)) {
+        contacts.push(sender);
+        localStorage.setItem('chat_contacts', JSON.stringify(contacts));
+        renderContacts();
+      }
+
+      if (!chatHistory[sender]) chatHistory[sender] = [];
+      chatHistory[sender].push({ sender, text: decrypted, type: 'received' });
+      localStorage.setItem('chat_history', JSON.stringify(chatHistory));
+
+      if (activeContact === sender) {
+        appendMessage(sender, decrypted, 'received');
+      }
+    }
+
+    function addContact() {
+      const input = document.getElementById('new-contact');
+      const target = input.value.trim().toLowerCase();
+      if (!target || target === currentUser) return;
+
+      if (!contacts.includes(target)) {
+        contacts.push(target);
+        localStorage.setItem('chat_contacts', JSON.stringify(contacts));
+        renderContacts();
+      }
+      selectContact(target);
+      input.value = "";
+    }
+
+    function selectContact(contact) {
+      activeContact = contact;
+      document.getElementById('message-input').disabled = false;
+      document.getElementById('send-btn').disabled = false;
+      document.getElementById('active-chat-name').innerText = contact;
+      document.getElementById('chat-status-text').innerText = "AES-GCM Sécurisé";
+      document.getElementById('chat-status-text').className = "text-[11px] text-emerald-400 font-medium";
+      
+      const container = document.getElementById('messages-container');
+      container.innerHTML = "";
+      
+      const history = chatHistory[contact] || [];
+      history.forEach(m => appendMessage(m.sender, m.text, m.type));
+      renderContacts();
+      showChatView();
+    }
+
+    function renderContacts() {
+      const list = document.getElementById('contacts-list');
+      list.innerHTML = "";
+      contacts.forEach(c => {
+        const isActive = activeContact === c;
+        const div = document.createElement('div');
+        div.className = `p-3.5 rounded-2xl cursor-pointer flex items-center justify-between transition-colors ${isActive ? 'bg-slate-800' : 'active:bg-slate-800/50'}`;
+        div.onclick = () => selectContact(c);
+        div.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full bg-slate-800 text-slate-300 font-bold flex items-center justify-center text-sm border border-slate-700">
+              ${c.substring(0, 2).toUpperCase()}
+            </div>
+            <div class="font-semibold text-slate-100 text-base">${c}</div>
+          </div>
+          <i class="fa-solid fa-chevron-right text-xs text-slate-600"></i>
+        `;
+        list.appendChild(div);
+      });
+    }
+
+    async function sendMessage(e) {
+      e.preventDefault();
+      const input = document.getElementById('message-input');
+      const text = input.value.trim();
+      if (!text || !activeContact) return;
+
+      const encryptedPayload = await encryptMessage(text, currentPassword);
+      const messageData = { sender: currentUser, recipient: activeContact, encryptedPayload };
+
+      socket.emit('send-message', { recipient: activeContact, messageData }, (res) => {
+        if (res.success) {
+          if (!chatHistory[activeContact]) chatHistory[activeContact] = [];
+          chatHistory[activeContact].push({ sender: currentUser, text, type: 'sent' });
+          localStorage.setItem('chat_history', JSON.stringify(chatHistory));
+
+          appendMessage('Moi', text, 'sent');
+          input.value = "";
+        }
+      });
+    }
+
+    function appendMessage(sender, text, type) {
+      const container = document.getElementById('messages-container');
+      const div = document.createElement('div');
+      div.className = `flex flex-col ${type === 'sent' ? 'items-end' : 'items-start'}`;
+      div.innerHTML = `
+        <div class="max-w-[85%] px-4 py-2.5 rounded-2xl text-base ${type === 'sent' ? 'bg-emerald-600 text-white rounded-br-xs shadow-md' : 'bg-slate-800 text-slate-100 rounded-bl-xs border border-slate-700/60'}">
+          ${text}
+        </div>
+      `;
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function logout() {
+      localStorage.clear();
+      location.reload();
+    }
+
+    // --- WebCrypto ---
+    async function getKey(password) {
+      const enc = new TextEncoder();
+      const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
+      return crypto.subtle.deriveKey(
+        { name: "PBKDF2", salt: enc.encode("fixed-salt"), iterations: 100000, hash: "SHA-256" },
+        keyMaterial,
+        { name: "AES-GCM", length: 256 },
+        false,
+        ["encrypt", "decrypt"]
+      );
+    }
+
+    async function encryptMessage(text, password) {
+      const key = await getKey(password);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(text));
+      return { iv: Array.from(iv), data: Array.from(new Uint8Array(encrypted)) };
+    }
+
+    async function decryptMessage(payload, password) {
+      try {
+        const key = await getKey(password);
+        const decrypted = await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv: new Uint8Array(payload.iv) },
+          key,
+          new Uint8Array(payload.data)
+        );
+        return new TextDecoder().decode(decrypted);
+      } catch {
+        return "⚠️ [Message illisible]";
+      }
+    }
+  </script>
+</body>
+</html>
