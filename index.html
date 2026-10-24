@@ -35,6 +35,12 @@
           <input type="password" id="auth-password" required class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors">
         </div>
 
+        <!-- Champ Email Optionnel (affiché uniquement à l'inscription) -->
+        <div id="email-field-container" class="hidden">
+          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Email pour notifications <span class="text-slate-500 lowercase">(optionnel)</span></label>
+          <input type="email" id="auth-email" placeholder="exemple@mail.com" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors">
+        </div>
+
         <button type="submit" id="auth-submit-btn" class="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold py-3 px-4 rounded-xl shadow-lg transition-all active:scale-[0.98]">
           Se connecter
         </button>
@@ -69,6 +75,17 @@
         <button onclick="logout()" class="text-slate-400 hover:text-red-400 p-2 transition-colors" title="Se déconnecter">
           <i class="fa-solid fa-right-from-bracket text-base"></i>
         </button>
+      </div>
+
+      <!-- Option de modification d'Email -->
+      <div class="p-3 border-b border-slate-800/60 bg-slate-950/40">
+        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Email d'alerte</div>
+        <div class="flex items-center space-x-2">
+          <input type="email" id="settings-email" placeholder="Aucun email enregistré" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
+          <button onclick="saveEmailSetting()" class="bg-slate-800 hover:bg-slate-700 text-emerald-400 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors">
+            <i class="fa-solid fa-floppy-disk"></i>
+          </button>
+        </div>
       </div>
 
       <div class="p-3 border-b border-slate-800/60">
@@ -138,37 +155,6 @@
       return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
-    async function registerPushNotifications(vapidPublicKey) {
-      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-      try {
-        const reg = await navigator.serviceWorker.register('/sw.js');
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          const existingSub = await reg.pushManager.getSubscription();
-          if (!existingSub && vapidPublicKey) {
-            const sub = await reg.pushManager.subscribe({
-              userVisibleOnly: true,
-              applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
-            });
-            socket.emit('save-subscription', sub);
-          }
-        }
-      } catch (err) {
-        console.error("Erreur Push:", err);
-      }
-    }
-
-    function urlBase64ToUint8Array(base64String) {
-      const padding = '='.repeat((4 - base64String.length % 4) % 4);
-      const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
-      const rawData = window.atob(base64);
-      const outputArray = new Uint8Array(rawData.length);
-      for (let i = 0; i < rawData.length; ++i) {
-        outputArray[i] = rawData.charCodeAt(i);
-      }
-      return outputArray;
-    }
-
     window.addEventListener('DOMContentLoaded', () => {
       const savedUser = localStorage.getItem('chat_username');
       const savedPassHash = localStorage.getItem('chat_passhash');
@@ -183,6 +169,14 @@
       document.getElementById('auth-title').innerText = isLoginMode ? "Connexion" : "Inscription";
       document.getElementById('auth-submit-btn').innerText = isLoginMode ? "Se connecter" : "S'inscrire";
       document.getElementById('auth-toggle-btn').innerText = isLoginMode ? "Pas encore de compte ? S'inscrire" : "Déjà un compte ? Se connecter";
+      
+      const emailContainer = document.getElementById('email-field-container');
+      if (isLoginMode) {
+        emailContainer.classList.add('hidden');
+      } else {
+        emailContainer.classList.remove('hidden');
+      }
+
       document.getElementById('auth-error').classList.add('hidden');
     }
 
@@ -190,20 +184,21 @@
       e.preventDefault();
       const username = document.getElementById('auth-username').value.trim();
       const password = document.getElementById('auth-password').value;
+      const email = document.getElementById('auth-email').value.trim();
       const errorEl = document.getElementById('auth-error');
 
       if (!username || !password) return;
 
       errorEl.classList.add('hidden');
       const passHash = await hashPassword(password);
-      performLogin(username, passHash, false);
+      performLogin(username, passHash, false, email);
     }
 
-    function performLogin(username, passHash, isAuto) {
+    function performLogin(username, passHash, isAuto, email = "") {
       socket.connect();
 
       if (!isAuto && !isLoginMode) {
-        socket.emit('register', { username, passwordHash: passHash }, (res) => {
+        socket.emit('register', { username, passwordHash: passHash, email }, (res) => {
           if (res.success) {
             performLogin(username, passHash, true);
           } else {
@@ -220,13 +215,15 @@
           localStorage.setItem('chat_username', username);
           localStorage.setItem('chat_passhash', passHash);
 
-          registerPushNotifications(res.vapidPublicKey);
-
           document.getElementById('auth-modal').classList.add('hidden');
           document.getElementById('app-interface').classList.remove('hidden');
           document.getElementById('app-interface').classList.add('flex');
           document.getElementById('user-display').innerText = username;
           document.getElementById('user-avatar').innerText = username[0].toUpperCase();
+          
+          if (res.email) {
+            document.getElementById('settings-email').value = res.email;
+          }
 
           if (res.history && res.history.length > 0) {
             for (const msg of res.history) {
@@ -254,6 +251,17 @@
             showAuthError(res.message);
             socket.disconnect();
           }
+        }
+      });
+    }
+
+    function saveEmailSetting() {
+      const email = document.getElementById('settings-email').value.trim();
+      socket.emit('update-email', { email }, (res) => {
+        if (res.success) {
+          alert("Email mis à jour avec succès !");
+        } else {
+          alert("Erreur lors de la mise à jour.");
         }
       });
     }
