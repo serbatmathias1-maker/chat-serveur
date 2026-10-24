@@ -80,6 +80,9 @@
         </form>
       </div>
 
+      <div class="p-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Annonces & Mises à jour</div>
+      <div id="channels-list" class="px-2 space-y-1 mb-2"></div>
+
       <div class="p-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Messages Privés</div>
       <div id="conversations-list" class="flex-1 overflow-y-auto px-2 space-y-1"></div>
     </aside>
@@ -111,7 +114,7 @@
       <footer id="chat-footer" class="bg-slate-900 border-t border-slate-800 p-3 shrink-0 hidden">
         <form id="chat-form" onsubmit="sendMessage(event)" class="flex items-center space-x-2">
           <input type="text" id="message-input" placeholder="Envoyer un message..." required autocomplete="off" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
-          <button type="submit" class="bg-emerald-500 text-slate-950 p-2.5 rounded-xl font-bold flex items-center justify-center hover:bg-emerald-400 active:scale-95 transition-all">
+          <button type="submit" id="send-btn" class="bg-emerald-500 text-slate-950 p-2.5 rounded-xl font-bold flex items-center justify-center hover:bg-emerald-400 active:scale-95 transition-all">
             <i class="fa-solid fa-paper-plane text-sm"></i>
           </button>
         </form>
@@ -127,7 +130,9 @@
     let currentUser = null;
     let isLoginMode = true;
     let activeRecipient = null;
-    const chats = {};
+    const chats = {
+      'patchnote': [] // Initialisation du canal patchnote
+    };
 
     async function hashPassword(password) {
       const enc = new TextEncoder();
@@ -135,7 +140,6 @@
       return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
-    // --- VÉRIFICATION AU CHARGEMENT (RECO AUTO) ---
     window.addEventListener('DOMContentLoaded', () => {
       const savedUser = localStorage.getItem('chat_username');
       const savedPassHash = localStorage.getItem('chat_passhash');
@@ -163,19 +167,15 @@
 
       errorEl.classList.add('hidden');
       const passHash = await hashPassword(password);
-
       performLogin(username, passHash, false);
     }
 
     function performLogin(username, passHash, isAuto) {
       socket.connect();
-      const event = isAuto ? 'login' : (isLoginMode ? 'login' : 'register');
 
-      // Si c'est une inscription manuelle, on utilise 'register'
       if (!isAuto && !isLoginMode) {
         socket.emit('register', { username, passwordHash: passHash }, (res) => {
           if (res.success) {
-            // Une fois inscrit, on connecte directement
             performLogin(username, passHash, true);
           } else {
             showAuthError(res.message);
@@ -188,7 +188,6 @@
       socket.emit('login', { username, passwordHash: passHash }, (res) => {
         if (res.success) {
           currentUser = username;
-          // Sauvegarde pour rester connecté
           localStorage.setItem('chat_username', username);
           localStorage.setItem('chat_passhash', passHash);
 
@@ -200,18 +199,23 @@
 
           if (res.history && res.history.length > 0) {
             for (const msg of res.history) {
-              const peer = (msg.sender === currentUser) ? msg.recipient : msg.sender;
-              const isMe = (msg.sender === currentUser);
-              const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              
-              if (!chats[peer]) chats[peer] = [];
-              chats[peer].push({ sender: msg.sender, text: msg.text, isMe, time });
+              if (msg.recipient === 'patchnote') {
+                const isMe = (msg.sender === currentUser);
+                const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                chats['patchnote'].push({ sender: msg.sender, text: msg.text, isMe, time });
+              } else {
+                const peer = (msg.sender === currentUser) ? msg.recipient : msg.sender;
+                const isMe = (msg.sender === currentUser);
+                const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                
+                if (!chats[peer]) chats[peer] = [];
+                chats[peer].push({ sender: msg.sender, text: msg.text, isMe, time });
+              }
             }
           }
           renderConversationsList();
         } else {
           if (isAuto) {
-            // Si les identifiants stockés ne sont plus valides, on nettoie le cache
             localStorage.removeItem('chat_username');
             localStorage.removeItem('chat_passhash');
             socket.disconnect();
@@ -251,9 +255,20 @@
       activeRecipient = recipient;
       if (!chats[recipient]) chats[recipient] = [];
 
-      document.getElementById('active-chat-name').innerText = `@${recipient}`;
-      document.getElementById('active-chat-avatar').innerText = recipient[0].toUpperCase();
-      document.getElementById('chat-footer').classList.remove('hidden');
+      const isPatchnote = (recipient === 'patchnote');
+      document.getElementById('active-chat-name').innerText = isPatchnote ? "#patchnote" : `@${recipient}`;
+      document.getElementById('active-chat-avatar').innerText = isPatchnote ? "#" : recipient[0].toUpperCase();
+      
+      const chatFooter = document.getElementById('chat-footer');
+      chatFooter.classList.remove('hidden');
+
+      // Si c'est le patchnote et que l'utilisateur n'est ni Wifmat ni Vortex, on masque la barre d'écriture
+      const allowedAdmins = ['Wifmat', 'Vortex'];
+      const isAdmin = allowedAdmins.some(admin => admin.toLowerCase() === currentUser.toLowerCase());
+
+      if (isPatchnote && !isAdmin) {
+        chatFooter.classList.add('hidden');
+      }
 
       const sidebar = document.getElementById('sidebar');
       const chatWindow = document.getElementById('chat-window');
@@ -272,20 +287,42 @@
       document.getElementById('chat-window').classList.remove('flex');
     }
 
-    function storeMessage(peer, sender, text, isMe) {
-      if (!chats[peer]) chats[peer] = [];
+    function storeMessage(targetKey, sender, text, isMe) {
+      if (!chats[targetKey]) chats[targetKey] = [];
       const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      chats[peer].push({ sender, text, isMe, time });
+      chats[targetKey].push({ sender, text, isMe, time });
       
-      if (activeRecipient === peer) renderMessages();
+      if (activeRecipient === targetKey) renderMessages();
       renderConversationsList();
     }
 
     function renderConversationsList() {
+      // 1. Rendu du canal Patchnote en haut
+      const channelsEl = document.getElementById('channels-list');
+      channelsEl.innerHTML = "";
+
+      const isPatchnoteActive = (activeRecipient === 'patchnote');
+      const patchnoteBtn = document.createElement('button');
+      patchnoteBtn.onclick = () => selectChat('patchnote');
+      patchnoteBtn.className = `w-full flex items-center space-x-3 p-2.5 rounded-xl text-left transition-colors ${
+        isPatchnoteActive ? 'bg-slate-800 text-slate-100 font-semibold' : 'hover:bg-slate-800/50 text-slate-400'
+      }`;
+      patchnoteBtn.innerHTML = `
+        <div class="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs shrink-0">
+          #
+        </div>
+        <div class="flex-1 overflow-hidden">
+          <div class="text-xs font-bold truncate text-slate-200">patchnote</div>
+          <div class="text-[11px] text-slate-500 truncate">Mises à jour officielles</div>
+        </div>
+      `;
+      channelsEl.appendChild(patchnoteBtn);
+
+      // 2. Rendu des conversations privées habituelles
       const listEl = document.getElementById('conversations-list');
       listEl.innerHTML = "";
 
-      const peers = Object.keys(chats);
+      const peers = Object.keys(chats).filter(k => k !== 'patchnote');
 
       if (peers.length === 0) {
         listEl.innerHTML = `<div class="text-xs text-slate-600 px-3 py-2 italic">Aucune conversation</div>`;
@@ -327,8 +364,8 @@
       if (msgs.length === 0) {
         chatBox.innerHTML = `
           <div class="h-full flex flex-col items-center justify-center text-slate-600 space-y-1">
-            <p class="text-xs">C'est le début de ton histoire avec <span class="text-emerald-400 font-bold">@${activeRecipient}</span></p>
-            <p class="text-[10px]">Envoyez un message pour commencer.</p>
+            <p class="text-xs">C'est le début de ce canal <span class="text-emerald-400 font-bold">#patchnote</span></p>
+            <p class="text-[10px]">Aucune mise à jour publiée pour l'instant.</p>
           </div>
         `;
         return;
@@ -342,6 +379,14 @@
         bubble.className = `max-w-[80%] rounded-2xl px-4 py-2 text-xs shadow-sm ${
           msg.isMe ? 'bg-emerald-500 text-slate-950 rounded-br-none font-medium' : 'bg-slate-900 border border-slate-800 text-slate-100 rounded-bl-none'
         }`;
+
+        // Si c'est le patchnote et que ce n'est pas nous, afficher le nom de l'auteur au-dessus
+        if (activeRecipient === 'patchnote' && !msg.isMe) {
+          const authorDiv = document.createElement('div');
+          authorDiv.className = 'text-[10px] font-bold text-emerald-400 mb-0.5';
+          authorDiv.innerText = msg.sender;
+          bubble.appendChild(authorDiv);
+        }
 
         const textDiv = document.createElement('div');
         textDiv.innerText = msg.text;
@@ -370,16 +415,26 @@
 
       socket.emit('send-message', { recipient: activeRecipient, text }, (res) => {
         if (res && res.success) {
-          storeMessage(activeRecipient, currentUser, text, true);
+          if (activeRecipient === 'patchnote') {
+            storeMessage('patchnote', currentUser, text, true);
+          } else {
+            storeMessage(activeRecipient, currentUser, text, true);
+          }
           messageInput.value = "";
         } else {
-          alert("Erreur d'envoi du message.");
+          alert(res ? res.message : "Erreur d'envoi du message.");
         }
       });
     }
 
     socket.on('new-message', (data) => {
-      storeMessage(data.sender, data.sender, data.text, false);
+      const isMe = (data.sender === currentUser);
+      if (data.recipient === 'patchnote') {
+        storeMessage('patchnote', data.sender, data.text, isMe);
+      } else {
+        const peer = isMe ? activeRecipient : data.sender;
+        storeMessage(peer, data.sender, data.text, isMe);
+      }
     });
   </script>
 </body>
