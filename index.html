@@ -66,7 +66,7 @@
             </span>
           </div>
         </div>
-        <button onclick="logout()" class="text-slate-400 hover:text-red-400 p-2 transition-colors">
+        <button onclick="logout()" class="text-slate-400 hover:text-red-400 p-2 transition-colors" title="Se déconnecter">
           <i class="fa-solid fa-right-from-bracket text-base"></i>
         </button>
       </div>
@@ -135,6 +135,16 @@
       return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
+    // --- VÉRIFICATION AU CHARGEMENT (RECO AUTO) ---
+    window.addEventListener('DOMContentLoaded', () => {
+      const savedUser = localStorage.getItem('chat_username');
+      const savedPassHash = localStorage.getItem('chat_passhash');
+
+      if (savedUser && savedPassHash) {
+        performLogin(savedUser, savedPassHash, true);
+      }
+    });
+
     function toggleAuthMode() {
       isLoginMode = !isLoginMode;
       document.getElementById('auth-title').innerText = isLoginMode ? "Connexion" : "Inscription";
@@ -154,19 +164,40 @@
       errorEl.classList.add('hidden');
       const passHash = await hashPassword(password);
 
-      socket.connect();
+      performLogin(username, passHash, false);
+    }
 
-      const event = isLoginMode ? 'login' : 'register';
-      socket.emit(event, { username, passwordHash: passHash }, (res) => {
+    function performLogin(username, passHash, isAuto) {
+      socket.connect();
+      const event = isAuto ? 'login' : (isLoginMode ? 'login' : 'register');
+
+      // Si c'est une inscription manuelle, on utilise 'register'
+      if (!isAuto && !isLoginMode) {
+        socket.emit('register', { username, passwordHash: passHash }, (res) => {
+          if (res.success) {
+            // Une fois inscrit, on connecte directement
+            performLogin(username, passHash, true);
+          } else {
+            showAuthError(res.message);
+            socket.disconnect();
+          }
+        });
+        return;
+      }
+
+      socket.emit('login', { username, passwordHash: passHash }, (res) => {
         if (res.success) {
           currentUser = username;
+          // Sauvegarde pour rester connecté
+          localStorage.setItem('chat_username', username);
+          localStorage.setItem('chat_passhash', passHash);
+
           document.getElementById('auth-modal').classList.add('hidden');
           document.getElementById('app-interface').classList.remove('hidden');
           document.getElementById('app-interface').classList.add('flex');
           document.getElementById('user-display').innerText = username;
           document.getElementById('user-avatar').innerText = username[0].toUpperCase();
 
-          // Charger l'historique global
           if (res.history && res.history.length > 0) {
             for (const msg of res.history) {
               const peer = (msg.sender === currentUser) ? msg.recipient : msg.sender;
@@ -179,14 +210,28 @@
           }
           renderConversationsList();
         } else {
-          errorEl.innerText = res.message;
-          errorEl.classList.remove('hidden');
-          socket.disconnect();
+          if (isAuto) {
+            // Si les identifiants stockés ne sont plus valides, on nettoie le cache
+            localStorage.removeItem('chat_username');
+            localStorage.removeItem('chat_passhash');
+            socket.disconnect();
+          } else {
+            showAuthError(res.message);
+            socket.disconnect();
+          }
         }
       });
     }
 
+    function showAuthError(msg) {
+      const errorEl = document.getElementById('auth-error');
+      errorEl.innerText = msg;
+      errorEl.classList.remove('hidden');
+    }
+
     function logout() {
+      localStorage.removeItem('chat_username');
+      localStorage.removeItem('chat_passhash');
       location.reload();
     }
 
@@ -314,7 +359,7 @@
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-  async function sendMessage(e) {
+    async function sendMessage(e) {
       e.preventDefault();
       if (!activeRecipient) return;
 
@@ -328,8 +373,14 @@
           storeMessage(activeRecipient, currentUser, text, true);
           messageInput.value = "";
         } else {
-          console.error("Erreur d'envoi :", res ? res.message : "Pas de réponse");
-          alert("Erreur d'envoi du message. Vérifie ta connexion.");
+          alert("Erreur d'envoi du message.");
         }
       });
     }
+
+    socket.on('new-message', (data) => {
+      storeMessage(data.sender, data.sender, data.text, false);
+    });
+  </script>
+</body>
+</html>
