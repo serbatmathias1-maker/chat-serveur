@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Messagerie Secrète E2EE</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body { touch-action: manipulation; }
+    .h-dvh { height: 100dvh; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 h-dvh flex flex-col font-sans overflow-hidden select-none">
+
+  <!-- MODAL CONNEXION / INSCRIPTION -->
+  <div id="auth-modal" class="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-800 shadow-2xl w-full max-w-sm">
+      <div class="text-center mb-6">
+        <div class="w-16 h-16 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-3 border border-emerald-500/20">
+          <i class="fa-solid fa-shield-halved text-3xl"></i>
+        </div>
+        <h2 id="auth-title" class="text-2xl font-bold">Connexion</h2>
+        <p class="text-slate-400 text-xs mt-1">Messagerie privée E2EE</p>
+      </div>
+
+      <form id="auth-form" onsubmit="handleAuth(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Pseudo</label>
+          <input type="text" id="auth-username" required class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Mot de passe</label>
+          <input type="password" id="auth-password" required class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors">
+        </div>
+
+        <button type="submit" id="auth-submit-btn" class="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold py-3 px-4 rounded-xl shadow-lg transition-all active:scale-[0.98]">
+          Se connecter
+        </button>
+      </form>
+
+      <div class="mt-4 text-center">
+        <button type="button" onclick="toggleAuthMode()" id="auth-toggle-btn" class="text-xs text-slate-400 hover:text-emerald-400 transition-colors">
+          Pas encore de compte ? S'inscrire
+        </button>
+      </div>
+      <p id="auth-error" class="text-red-400 text-xs text-center mt-3 hidden"></p>
+    </div>
+  </div>
+
+  <!-- INTERFACE PRINCIPALE DE CHAT STYLE DISCORD -->
+  <div id="app-interface" class="hidden flex-1 h-full flex overflow-hidden">
+    
+    <!-- BARRE LATÉRALE (LISTE DES CONVERSATIONS MP) -->
+    <aside id="sidebar" class="w-full md:w-80 bg-slate-900 border-r border-slate-800 flex flex-col shrink-0 h-full">
+      <!-- User profile header -->
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center font-bold">
+            <span id="user-avatar">?</span>
+          </div>
+          <div>
+            <h1 id="user-display" class="font-bold text-sm">Chargement...</h1>
+            <span class="inline-flex items-center text-[10px] text-emerald-400">
+              <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 animate-pulse"></span> Chiffré E2EE
+            </span>
+          </div>
+        </div>
+        <button onclick="logout()" class="text-slate-400 hover:text-red-400 p-2 transition-colors">
+          <i class="fa-solid fa-right-from-bracket text-base"></i>
+        </button>
+      </div>
+
+      <!-- Ajouter une nouvelle conversation -->
+      <div class="p-3 border-b border-slate-800/60">
+        <form onsubmit="startNewChat(event)" class="flex items-center space-x-2">
+          <input type="text" id="new-chat-input" placeholder="Pseudo de l'ami..." required class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
+          <button type="submit" class="bg-emerald-500 text-slate-950 p-2 rounded-xl text-xs font-bold hover:bg-emerald-400 transition-colors">
+            <i class="fa-solid fa-plus"></i>
+          </button>
+        </form>
+      </div>
+
+      <!-- Liste des salons MP -->
+      <div class="p-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Messages Privés</div>
+      <div id="conversations-list" class="flex-1 overflow-y-auto px-2 space-y-1">
+        <!-- Généré dynamiquement -->
+      </div>
+    </aside>
+
+    <!-- ZONE DE DISCUSSION PRINCIPALE -->
+    <main id="chat-window" class="hidden md:flex flex-1 flex-col h-full bg-slate-950">
+      <!-- En-tête de la conversation active -->
+      <header id="chat-header" class="bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between shrink-0">
+        <div class="flex items-center space-x-3">
+          <button onclick="showSidebarOnMobile()" class="md:hidden text-slate-400 p-1 mr-1">
+            <i class="fa-solid fa-arrow-left text-lg"></i>
+          </button>
+          <div class="w-9 h-9 bg-slate-800 text-emerald-400 rounded-full flex items-center justify-center font-bold text-sm">
+            <span id="active-chat-avatar">@</span>
+          </div>
+          <div>
+            <h2 id="active-chat-name" class="font-bold text-sm">Sélectionnez une discussion</h2>
+            <p id="active-chat-status" class="text-[10px] text-slate-400">Discussion directe sécurisée</p>
+          </div>
+        </div>
+      </header>
+
+      <!-- Zone d'affichage des messages -->
+      <div id="chat-box" class="flex-1 overflow-y-auto p-4 space-y-3">
+        <div id="no-chat-selected" class="h-full flex flex-col items-center justify-center text-slate-500 space-y-2">
+          <i class="fa-regular fa-comments text-4xl"></i>
+          <p class="text-xs">Sélectionne un ami à gauche ou démarre un nouveau MP</p>
+        </div>
+      </div>
+
+      <!-- Barre d'envoi -->
+      <footer id="chat-footer" class="bg-slate-900 border-t border-slate-800 p-3 shrink-0 hidden">
+        <form id="chat-form" onsubmit="sendMessage(event)" class="flex items-center space-x-2">
+          <input type="text" id="message-input" placeholder="Envoyer un message..." required autocomplete="off" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
+          <button type="submit" class="bg-emerald-500 text-slate-950 p-2.5 rounded-xl font-bold flex items-center justify-center hover:bg-emerald-400 active:scale-95 transition-all">
+            <i class="fa-solid fa-paper-plane text-sm"></i>
+          </button>
+        </form>
+      </footer>
+    </main>
+
+  </div>
+
+  <script>
+    const SERVER_URL = "https://chat-serveur.onrender.com";
+    const socket = io(SERVER_URL, { autoConnect: false });
+
+    let currentUser = null;
+    let userKey = null;
+    let isLoginMode = true;
+    let activeRecipient = null;
+
+    // Structure de stockage locale des messages : { "pseudo": [ { sender, text, isMe, timestamp } ] }
+    const chats = {};
+
+    // --- CHIFFREMENT (WEB CRYPTO API) ---
+    async function deriveKey(password, salt = "chat-e2ee-salt") {
+      const enc = new TextEncoder();
+      const keyMaterial = await window.crypto.subtle.importKey(
+        "raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveKey"]
+      );
+      return window.crypto.subtle.deriveKey(
+        { name: "PBKDF2", salt: enc.encode(salt), iterations: 100000, hash: "SHA-256" },
+        keyMaterial,
+        { name: "AES-GCM", length: 256 },
+        false,
+        ["encrypt", "decrypt"]
+      );
+    }
+
+    async function hashPassword(password) {
+      const enc = new TextEncoder();
+      const buf = await window.crypto.subtle.digest("SHA-256", enc.encode(password));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function encryptPayload(text, key) {
+      const enc = new TextEncoder();
+      const iv = window.crypto.getRandomValues(new Uint8Array(12));
+      const ciphertext = await window.crypto.subtle.encrypt(
+        { name: "AES-GCM", iv }, key, enc.encode(text)
+      );
+      return { iv: Array.from(iv), data: Array.from(new Uint8Array(ciphertext)) };
+    }
+
+    async function decryptPayload(payload, key) {
+      try {
+        const iv = new Uint8Array(payload.iv);
+        const data = new Uint8Array(payload.data);
+        const decrypted = await window.crypto.subtle.decrypt(
+          { name: "AES-GCM", iv }, key, data
+        );
+        return new TextDecoder().decode(decrypted);
+      } catch (e) {
+        return "⚠️ Message indisponible";
+      }
+    }
+
+    // --- AUTHENTIFICATION ---
+    function toggleAuthMode() {
+      isLoginMode = !isLoginMode;
+      document.getElementById('auth-title').innerText = isLoginMode ? "Connexion" : "Inscription";
+      document.getElementById('auth-submit-btn').innerText = isLoginMode ? "Se connecter" : "S'inscrire";
+      document.getElementById('auth-toggle-btn').innerText = isLoginMode ? "Pas encore de compte ? S'inscrire" : "Déjà un compte ? Se connecter";
+      document.getElementById('auth-error').classList.add('hidden');
+    }
+
+    async function handleAuth(e) {
+      e.preventDefault();
+      const username = document.getElementById('auth-username').value.trim();
+      const password = document.getElementById('auth-password').value;
+      const errorEl = document.getElementById('auth-error');
+
+      if (!username || !password) return;
+
+      errorEl.classList.add('hidden');
+      const passHash = await hashPassword(password);
+      userKey = await deriveKey(password);
+
+      socket.connect();
+
+      const event = isLoginMode ? 'login' : 'register';
+      socket.emit(event, { username, passwordHash: passHash }, async (res) => {
+        if (res.success) {
+          currentUser = username;
+          document.getElementById('auth-modal').classList.add('hidden');
+          document.getElementById('app-interface').classList.remove('hidden');
+          document.getElementById('app-interface').classList.add('flex');
+          document.getElementById('user-display').innerText = username;
+          document.getElementById('user-avatar').innerText = username[0].toUpperCase();
+
+          // Messages hors-ligne livrés par le serveur
+          if (res.messages && res.messages.length > 0) {
+            for (const msg of res.messages) {
+              const text = await decryptPayload(msg.encryptedPayload, userKey);
+              storeMessage(msg.sender, msg.sender, text, false);
+            }
+          }
+          renderConversationsList();
+        } else {
+          errorEl.innerText = res.message;
+          errorEl.classList.remove('hidden');
+          socket.disconnect();
+        }
+      });
+    }
+
+    function logout() {
+      location.reload();
+    }
+
+    // --- GESTION DES CONVERSATIONS & MP ---
+    function startNewChat(e) {
+      e.preventDefault();
+      const input = document.getElementById('new-chat-input');
+      const targetUser = input.value.trim();
+      
+      if (!targetUser || targetUser === currentUser) return;
+
+      if (!chats[targetUser]) {
+        chats[targetUser] = [];
+      }
+      input.value = "";
+      selectChat(targetUser);
+    }
+
+    function selectChat(recipient) {
+      activeRecipient = recipient;
+      if (!chats[recipient]) chats[recipient] = [];
+
+      document.getElementById('active-chat-name').innerText = `@${recipient}`;
+      document.getElementById('active-chat-avatar').innerText = recipient[0].toUpperCase();
+      document.getElementById('chat-footer').classList.remove('hidden');
+
+      // Masquer/Afficher sur mobile
+      const sidebar = document.getElementById('sidebar');
+      const chatWindow = document.getElementById('chat-window');
+      
+      sidebar.classList.add('hidden', 'md:flex');
+      chatWindow.classList.remove('hidden');
+      chatWindow.classList.add('flex');
+
+      renderMessages();
+      renderConversationsList();
+    }
+
+    function showSidebarOnMobile() {
+      document.getElementById('sidebar').classList.remove('hidden');
+      document.getElementById('chat-window').classList.add('hidden');
+      document.getElementById('chat-window').classList.remove('flex');
+    }
+
+    function storeMessage(peer, sender, text, isMe) {
+      if (!chats[peer]) chats[peer] = [];
+      chats[peer].push({ sender, text, isMe, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) });
+      
+      if (activeRecipient === peer) {
+        renderMessages();
+      }
+      renderConversationsList();
+    }
+
+    function renderConversationsList() {
+      const listEl = document.getElementById('conversations-list');
+      listEl.innerHTML = "";
+
+      const peers = Object.keys(chats);
+
+      if (peers.length === 0) {
+        listEl.innerHTML = `<div class="text-xs text-slate-600 px-3 py-2 italic">Aucune conversation</div>`;
+        return;
+      }
+
+      peers.forEach(peer => {
+        const msgs = chats[peer];
+        const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1].text : "Nouvelle conversation";
+        const isActive = peer === activeRecipient;
+
+        const btn = document.createElement('button');
+        btn.onclick = () => selectChat(peer);
+        btn.className = `w-full flex items-center space-x-3 p-2.5 rounded-xl text-left transition-colors ${
+          isActive ? 'bg-slate-800 text-slate-100 font-semibold' : 'hover:bg-slate-800/50 text-slate-400'
+        }`;
+
+        btn.innerHTML = `
+          <div class="w-8 h-8 rounded-full ${isActive ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-300'} flex items-center justify-center font-bold text-xs shrink-0">
+            ${peer[0].toUpperCase()}
+          </div>
+          <div class="flex-1 overflow-hidden">
+            <div class="text-xs font-bold truncate text-slate-200">@${peer}</div>
+            <div class="text-[11px] text-slate-500 truncate">${lastMsg}</div>
+          </div>
+        `;
+        listEl.appendChild(btn);
+      });
+    }
+
+    function renderMessages() {
+      const chatBox = document.getElementById('chat-box');
+      chatBox.innerHTML = "";
+
+      if (!activeRecipient || !chats[activeRecipient]) return;
+
+      const msgs = chats[activeRecipient];
+
+      if (msgs.length === 0) {
+        chatBox.innerHTML = `
+          <div class="h-full flex flex-col items-center justify-center text-slate-600 space-y-1">
+            <p class="text-xs">C'est le début de ton histoire avec <span class="text-emerald-400 font-bold">@${activeRecipient}</span></p>
+            <p class="text-[10px]">Envoyez un message pour commencer.</p>
+          </div>
+        `;
+        return;
+      }
+
+      msgs.forEach(msg => {
+        const wrapper = document.createElement('div');
+        wrapper.className = `flex flex-col ${msg.isMe ? 'items-end' : 'items-start'}`;
+
+        const bubble = document.createElement('div');
+        bubble.className = `max-w-[80%] rounded-2xl px-4 py-2 text-xs shadow-sm ${
+          msg.isMe ? 'bg-emerald-500 text-slate-950 rounded-br-none font-medium' : 'bg-slate-900 border border-slate-800 text-slate-100 rounded-bl-none'
+        }`;
+
+        const textDiv = document.createElement('div');
+        textDiv.innerText = msg.text;
+
+        const timeDiv = document.createElement('div');
+        timeDiv.className = `text-[9px] mt-1 text-right ${msg.isMe ? 'text-slate-800' : 'text-slate-500'}`;
+        timeDiv.innerText = msg.time;
+
+        bubble.appendChild(textDiv);
+        bubble.appendChild(timeDiv);
+        wrapper.appendChild(bubble);
+        chatBox.appendChild(wrapper);
+      });
+
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // --- ENVOI / RÉCEPTION SOCKET ---
+    async function sendMessage(e) {
+      e.preventDefault();
+      if (!activeRecipient) return;
+
+      const messageInput = document.getElementById('message-input');
+      const text = messageInput.value.trim();
+
+      if (!text) return;
+
+      const encrypted = await encryptPayload(text, userKey);
+      const messageData = {
+        sender: currentUser,
+        encryptedPayload: encrypted
+      };
+
+      socket.emit('send-message', { recipient: activeRecipient, messageData }, (res) => {
+        if (res.success) {
+          storeMessage(activeRecipient, currentUser, text, true);
+          messageInput.value = "";
+        }
+      });
+    }
+
+    socket.on('new-message', async (messageData) => {
+      const text = await decryptPayload(messageData.encryptedPayload, userKey);
+      storeMessage(messageData.sender, messageData.sender, text, false);
+    });
+  </script>
+</body>
+</html>
