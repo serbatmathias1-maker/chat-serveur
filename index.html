@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Messagerie Secrète E2EE</title>
+  <title>Messagerie Privée</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -19,10 +19,10 @@
     <div class="bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-800 shadow-2xl w-full max-w-sm">
       <div class="text-center mb-6">
         <div class="w-16 h-16 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-3 border border-emerald-500/20">
-          <i class="fa-solid fa-shield-halved text-3xl"></i>
+          <i class="fa-solid fa-comments text-3xl"></i>
         </div>
         <h2 id="auth-title" class="text-2xl font-bold">Connexion</h2>
-        <p class="text-slate-400 text-xs mt-1">Messagerie privée E2EE</p>
+        <p class="text-slate-400 text-xs mt-1">Messagerie sécurisée</p>
       </div>
 
       <form id="auth-form" onsubmit="handleAuth(event)" class="space-y-4">
@@ -49,7 +49,7 @@
     </div>
   </div>
 
-  <!-- INTERFACE PRINCIPALE STYLE DISCORD -->
+  <!-- INTERFACE DISCORD -->
   <div id="app-interface" class="hidden flex-1 h-full flex overflow-hidden">
     
     <!-- BARRE LATÉRALE -->
@@ -62,7 +62,7 @@
           <div>
             <h1 id="user-display" class="font-bold text-sm">Chargement...</h1>
             <span class="inline-flex items-center text-[10px] text-emerald-400">
-              <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 animate-pulse"></span> Sauvegardé en BDD
+              <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 animate-pulse"></span> En ligne
             </span>
           </div>
         </div>
@@ -84,7 +84,7 @@
       <div id="conversations-list" class="flex-1 overflow-y-auto px-2 space-y-1"></div>
     </aside>
 
-    <!-- ZONE DE DISCUSSION PRINCIPALE -->
+    <!-- ZONE DE DISCUSSION -->
     <main id="chat-window" class="hidden md:flex flex-1 flex-col h-full bg-slate-950">
       <header id="chat-header" class="bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between shrink-0">
         <div class="flex items-center space-x-3">
@@ -96,7 +96,7 @@
           </div>
           <div>
             <h2 id="active-chat-name" class="font-bold text-sm">Sélectionnez une discussion</h2>
-            <p id="active-chat-status" class="text-[10px] text-slate-400">Chiffrement E2EE actif</p>
+            <p id="active-chat-status" class="text-[10px] text-slate-400">Discussion directe</p>
           </div>
         </div>
       </header>
@@ -125,26 +125,9 @@
     const socket = io(SERVER_URL, { autoConnect: false });
 
     let currentUser = null;
-    let userKey = null;
     let isLoginMode = true;
     let activeRecipient = null;
-
     const chats = {};
-
-    // --- CHIFFREMENT (WEB CRYPTO API) ---
-    async function deriveKey(password, salt = "chat-e2ee-salt") {
-      const enc = new TextEncoder();
-      const keyMaterial = await window.crypto.subtle.importKey(
-        "raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveKey"]
-      );
-      return window.crypto.subtle.deriveKey(
-        { name: "PBKDF2", salt: enc.encode(salt), iterations: 100000, hash: "SHA-256" },
-        keyMaterial,
-        { name: "AES-GCM", length: 256 },
-        false,
-        ["encrypt", "decrypt"]
-      );
-    }
 
     async function hashPassword(password) {
       const enc = new TextEncoder();
@@ -152,29 +135,6 @@
       return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
-    async function encryptPayload(text, key) {
-      const enc = new TextEncoder();
-      const iv = window.crypto.getRandomValues(new Uint8Array(12));
-      const ciphertext = await window.crypto.subtle.encrypt(
-        { name: "AES-GCM", iv }, key, enc.encode(text)
-      );
-      return { iv: Array.from(iv), data: Array.from(new Uint8Array(ciphertext)) };
-    }
-
-    async function decryptPayload(payload, key) {
-      try {
-        const iv = new Uint8Array(payload.iv);
-        const data = new Uint8Array(payload.data);
-        const decrypted = await window.crypto.subtle.decrypt(
-          { name: "AES-GCM", iv }, key, data
-        );
-        return new TextDecoder().decode(decrypted);
-      } catch (e) {
-        return "⚠️ Impossible de déchiffrer ce message";
-      }
-    }
-
-    // --- AUTHENTIFICATION ---
     function toggleAuthMode() {
       isLoginMode = !isLoginMode;
       document.getElementById('auth-title').innerText = isLoginMode ? "Connexion" : "Inscription";
@@ -193,12 +153,11 @@
 
       errorEl.classList.add('hidden');
       const passHash = await hashPassword(password);
-      userKey = await deriveKey(password);
 
       socket.connect();
 
       const event = isLoginMode ? 'login' : 'register';
-      socket.emit(event, { username, passwordHash: passHash }, async (res) => {
+      socket.emit(event, { username, passwordHash: passHash }, (res) => {
         if (res.success) {
           currentUser = username;
           document.getElementById('auth-modal').classList.add('hidden');
@@ -207,16 +166,15 @@
           document.getElementById('user-display').innerText = username;
           document.getElementById('user-avatar').innerText = username[0].toUpperCase();
 
-          // Charger et reconstruire TOUTES les conversations et messages depuis l'historique BDD
+          // Charger l'historique global
           if (res.history && res.history.length > 0) {
             for (const msg of res.history) {
-              const text = await decryptPayload(msg.encryptedPayload, userKey);
               const peer = (msg.sender === currentUser) ? msg.recipient : msg.sender;
               const isMe = (msg.sender === currentUser);
               const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
               
               if (!chats[peer]) chats[peer] = [];
-              chats[peer].push({ sender: msg.sender, text, isMe, time });
+              chats[peer].push({ sender: msg.sender, text: msg.text, isMe, time });
             }
           }
           renderConversationsList();
@@ -232,7 +190,6 @@
       location.reload();
     }
 
-    // --- INTERFACE & LOGIQUE CHAT ---
     function startNewChat(e) {
       e.preventDefault();
       const input = document.getElementById('new-chat-input');
@@ -357,7 +314,6 @@
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    // --- ENVOI / RÉCEPTION ---
     async function sendMessage(e) {
       e.preventDefault();
       if (!activeRecipient) return;
@@ -367,13 +323,7 @@
 
       if (!text) return;
 
-      const encrypted = await encryptPayload(text, userKey);
-      const messageData = {
-        sender: currentUser,
-        encryptedPayload: encrypted
-      };
-
-      socket.emit('send-message', { recipient: activeRecipient, messageData }, (res) => {
+      socket.emit('send-message', { recipient: activeRecipient, text }, (res) => {
         if (res.success) {
           storeMessage(activeRecipient, currentUser, text, true);
           messageInput.value = "";
@@ -381,9 +331,8 @@
       });
     }
 
-    socket.on('new-message', async (messageData) => {
-      const text = await decryptPayload(messageData.encryptedPayload, userKey);
-      storeMessage(messageData.sender, messageData.sender, text, false);
+    socket.on('new-message', (data) => {
+      storeMessage(data.sender, data.sender, data.text, false);
     });
   </script>
 </body>
