@@ -314,7 +314,7 @@
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    async function sendMessage(e) {
+  async function sendMessage(e) {
       e.preventDefault();
       if (!activeRecipient) return;
 
@@ -324,16 +324,12 @@
       if (!text) return;
 
       socket.emit('send-message', { recipient: activeRecipient, text }, (res) => {
-        if (res.success) {
+        if (res && res.success) {
           storeMessage(activeRecipient, currentUser, text, true);
           messageInput.value = "";
+        } else {
+          console.error("Erreur d'envoi :", res ? res.message : "Pas de réponse");
+          alert("Erreur d'envoi du message. Vérifie ta connexion.");
         }
       });
     }
-
-    socket.on('new-message', (data) => {
-      storeMessage(data.sender, data.sender, data.text, false);
-    });
-  </script>
-</body>
-</html>
