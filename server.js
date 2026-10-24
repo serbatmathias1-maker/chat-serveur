@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
+const webpush = require('web-push');
 
 const app = express();
 const server = http.createServer(app);
@@ -15,9 +16,19 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log("✅ Connecté à MongoDB Atlas !"))
   .catch(err => console.error("❌ Erreur MongoDB:", err));
 
+const publicVapidKey = process.env.VAPID_PUBLIC_KEY || "BN8x3V9zX5q1K...remplace_par_ta_cle_publique...";
+const privateVapidKey = process.env.VAPID_PRIVATE_KEY || "1a2b3c...remplace_par_ta_cle_privee...";
+
+try {
+  webpush.setVapidDetails('mailto:admin@tonchat.com', publicVapidKey, privateVapidKey);
+} catch (e) {
+  console.log("⚠️ Configuration VAPID par défaut");
+}
+
 const User = mongoose.model('User', new mongoose.Schema({
   username: { type: String, unique: true, required: true },
-  passwordHash: { type: String, required: true }
+  passwordHash: { type: String, required: true },
+  pushSubscription: { type: Object, default: null }
 }));
 
 const Message = mongoose.model('Message', new mongoose.Schema({
@@ -58,7 +69,6 @@ io.on('connection', (socket) => {
       socket.data.username = username;
       userSockets[username] = socket.id;
 
-      // Récupérer l'historique personnel + les messages du canal patchnote (recipient: 'patchnote')
       const history = await Message.find({
         $or: [
           { sender: username },
@@ -67,9 +77,16 @@ io.on('connection', (socket) => {
         ]
       }).sort({ timestamp: 1 });
 
-      callback({ success: true, history });
+      callback({ success: true, history, vapidPublicKey: publicVapidKey });
     } catch (err) {
       callback({ success: false, message: "Erreur lors de la connexion." });
+    }
+  });
+
+  socket.on('save-subscription', async (subscription) => {
+    const username = socket.data.username;
+    if (username) {
+      await User.updateOne({ username }, { pushSubscription: subscription });
     }
   });
 
@@ -78,10 +95,8 @@ io.on('connection', (socket) => {
       const sender = socket.data.username || Object.keys(userSockets).find(user => userSockets[user] === socket.id);
       if (!sender) return callback({ success: false, message: "Non authentifié." });
 
-      // Si c'est le canal patchnote, vérifier que l'expéditeur est Wifmat ou Vortex
       if (recipient === 'patchnote') {
         const allowedAdmins = ['Wifmat', 'Vortex'];
-        // Vérification insensible à la casse pour plus de sécurité
         if (!allowedAdmins.some(admin => admin.toLowerCase() === sender.toLowerCase())) {
           return callback({ success: false, message: "Seuls Wifmat et Vortex peuvent écrire dans les patchnotes." });
         }
@@ -91,12 +106,29 @@ io.on('connection', (socket) => {
       await newMsg.save();
 
       if (recipient === 'patchnote') {
-        // Diffuser à tout le monde connecté
         io.emit('new-message', { sender, recipient: 'patchnote', text, timestamp: newMsg.timestamp });
+        
+        const allUsers = await User.find({ pushSubscription: { $ne: null } });
+        for (const u of allUsers) {
+          if (u.username !== sender) {
+            webpush.sendNotification(u.pushSubscription, JSON.stringify({
+              title: "📢 Nouveau #patchnote",
+              body: `${sender}: ${text}`
+            })).catch(() => {});
+          }
+        }
       } else {
         const recipientSocketId = userSockets[recipient];
         if (recipientSocketId) {
           io.to(recipientSocketId).emit('new-message', { sender, recipient: sender, text, timestamp: newMsg.timestamp });
+        } else {
+          const recipientUser = await User.findOne({ username: recipient });
+          if (recipientUser && recipientUser.pushSubscription) {
+            webpush.sendNotification(recipientUser.pushSubscription, JSON.stringify({
+              title: `💬 Message de @${sender}`,
+              body: text
+            })).catch(err => console.error("Erreur push:", err));
+          }
         }
       }
 
