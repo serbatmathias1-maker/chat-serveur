@@ -15,17 +15,16 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log("✅ Connecté à MongoDB Atlas !"))
   .catch(err => console.error("❌ Erreur MongoDB:", err));
 
-// Modèle Utilisateur
 const User = mongoose.model('User', new mongoose.Schema({
   username: { type: String, unique: true, required: true },
   passwordHash: { type: String, required: true }
 }));
 
-// Modèle Message Historique (Sauvegarde permanente chiffrée)
+// Modèle Message (Stockage en texte clair sécurisé par HTTPS/Atlas)
 const Message = mongoose.model('Message', new mongoose.Schema({
   sender: { type: String, required: true },
   recipient: { type: String, required: true },
-  encryptedPayload: { type: Object, required: true },
+  text: { type: String, required: true },
   timestamp: { type: Date, default: Date.now }
 }));
 
@@ -34,7 +33,6 @@ const userSockets = {};
 app.get('/ping', (req, res) => res.send('pong'));
 
 io.on('connection', (socket) => {
-  // Inscription
   socket.on('register', async ({ username, passwordHash }, callback) => {
     try {
       const existing = await User.findOne({ username });
@@ -50,7 +48,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Connexion + Récupération de tout l'historique
   socket.on('login', async ({ username, passwordHash }, callback) => {
     try {
       const user = await User.findOne({ username });
@@ -60,7 +57,7 @@ io.on('connection', (socket) => {
 
       userSockets[username] = socket.id;
 
-      // Récupérer TOUS les messages où l'utilisateur est soit l'expéditeur, soit le destinataire
+      // Récupérer l'historique complet pour ce compte
       const history = await Message.find({
         $or: [{ sender: username }, { recipient: username }]
       }).sort({ timestamp: 1 });
@@ -71,21 +68,17 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Envoi et sauvegarde automatique du message
-  socket.on('send-message', async ({ recipient, messageData }, callback) => {
+  socket.on('send-message', async ({ recipient, text }, callback) => {
     try {
-      // 1. Sauvegarde en BDD (Toujours chiffré)
-      const newMsg = new Message({
-        sender: messageData.sender,
-        recipient,
-        encryptedPayload: messageData.encryptedPayload
-      });
+      const sender = Object.keys(userSockets).find(user => userSockets[user] === socket.id);
+      if (!sender) return callback({ success: false, message: "Non authentifié." });
+
+      const newMsg = new Message({ sender, recipient, text });
       await newMsg.save();
 
-      // 2. Transmettre au destinataire s'il est connecté
       const recipientSocketId = userSockets[recipient];
       if (recipientSocketId) {
-        io.to(recipientSocketId).emit('new-message', messageData);
+        io.to(recipientSocketId).emit('new-message', { sender, text });
       }
 
       callback({ success: true });
@@ -103,6 +96,9 @@ io.on('connection', (socket) => {
     }
   });
 });
+
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, () => console.log(`Serveur actif sur le port ${PORT}`));
 
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log(`Serveur actif sur le port ${PORT}`));
