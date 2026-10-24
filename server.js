@@ -20,7 +20,6 @@ const User = mongoose.model('User', new mongoose.Schema({
   passwordHash: { type: String, required: true }
 }));
 
-// Modèle Message (Stockage en texte clair sécurisé par HTTPS/Atlas)
 const Message = mongoose.model('Message', new mongoose.Schema({
   sender: { type: String, required: true },
   recipient: { type: String, required: true },
@@ -41,6 +40,7 @@ io.on('connection', (socket) => {
       const newUser = new User({ username, passwordHash });
       await newUser.save();
       
+      socket.data.username = username;
       userSockets[username] = socket.id;
       callback({ success: true });
     } catch (err) {
@@ -55,9 +55,9 @@ io.on('connection', (socket) => {
         return callback({ success: false, message: "Identifiants incorrects." });
       }
 
+      socket.data.username = username;
       userSockets[username] = socket.id;
 
-      // Récupérer l'historique complet pour ce compte
       const history = await Message.find({
         $or: [{ sender: username }, { recipient: username }]
       }).sort({ timestamp: 1 });
@@ -70,7 +70,8 @@ io.on('connection', (socket) => {
 
   socket.on('send-message', async ({ recipient, text }, callback) => {
     try {
-      const sender = Object.keys(userSockets).find(user => userSockets[user] === socket.id);
+      // Utilisation directe de la session socket ou recherche de secours
+      const sender = socket.data.username || Object.keys(userSockets).find(user => userSockets[user] === socket.id);
       if (!sender) return callback({ success: false, message: "Non authentifié." });
 
       const newMsg = new Message({ sender, recipient, text });
@@ -96,9 +97,6 @@ io.on('connection', (socket) => {
     }
   });
 });
-
-const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => console.log(`Serveur actif sur le port ${PORT}`));
 
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log(`Serveur actif sur le port ${PORT}`));
