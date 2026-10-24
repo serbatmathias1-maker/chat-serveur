@@ -58,8 +58,13 @@ io.on('connection', (socket) => {
       socket.data.username = username;
       userSockets[username] = socket.id;
 
+      // Récupérer l'historique personnel + les messages du canal patchnote (recipient: 'patchnote')
       const history = await Message.find({
-        $or: [{ sender: username }, { recipient: username }]
+        $or: [
+          { sender: username },
+          { recipient: username },
+          { recipient: 'patchnote' }
+        ]
       }).sort({ timestamp: 1 });
 
       callback({ success: true, history });
@@ -70,16 +75,29 @@ io.on('connection', (socket) => {
 
   socket.on('send-message', async ({ recipient, text }, callback) => {
     try {
-      // Utilisation directe de la session socket ou recherche de secours
       const sender = socket.data.username || Object.keys(userSockets).find(user => userSockets[user] === socket.id);
       if (!sender) return callback({ success: false, message: "Non authentifié." });
+
+      // Si c'est le canal patchnote, vérifier que l'expéditeur est Wifmat ou Vortex
+      if (recipient === 'patchnote') {
+        const allowedAdmins = ['Wifmat', 'Vortex'];
+        // Vérification insensible à la casse pour plus de sécurité
+        if (!allowedAdmins.some(admin => admin.toLowerCase() === sender.toLowerCase())) {
+          return callback({ success: false, message: "Seuls Wifmat et Vortex peuvent écrire dans les patchnotes." });
+        }
+      }
 
       const newMsg = new Message({ sender, recipient, text });
       await newMsg.save();
 
-      const recipientSocketId = userSockets[recipient];
-      if (recipientSocketId) {
-        io.to(recipientSocketId).emit('new-message', { sender, text });
+      if (recipient === 'patchnote') {
+        // Diffuser à tout le monde connecté
+        io.emit('new-message', { sender, recipient: 'patchnote', text, timestamp: newMsg.timestamp });
+      } else {
+        const recipientSocketId = userSockets[recipient];
+        if (recipientSocketId) {
+          io.to(recipientSocketId).emit('new-message', { sender, recipient: sender, text, timestamp: newMsg.timestamp });
+        }
       }
 
       callback({ success: true });
