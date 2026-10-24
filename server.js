@@ -10,7 +10,7 @@ const io = new Server(server, {
 });
 
 // Connexion MongoDB Atlas avec ton nouveau mot de passe
-const MONGO_URI = "mongodb+srv://serbatmathias1_db_user:motdepasse1709@chat.5mznug4.mongodb.net/chat?retryWrites=true&w=majority";
+const MONGO_URI = "mongodb+srv://adminchat:MonPass1234@chat.5mznug4.mongodb.net/chat?retryWrites=true&w=majority"
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log("✅ Connecté à MongoDB Atlas !"))
