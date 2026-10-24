@@ -130,14 +130,43 @@
     let currentUser = null;
     let isLoginMode = true;
     let activeRecipient = null;
-    const chats = {
-      'patchnote': [] // Initialisation du canal patchnote
-    };
+    const chats = { 'patchnote': [] };
 
     async function hashPassword(password) {
       const enc = new TextEncoder();
       const buf = await window.crypto.subtle.digest("SHA-256", enc.encode(password));
       return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function registerPushNotifications(vapidPublicKey) {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      try {
+        const reg = await navigator.serviceWorker.register('/sw.js');
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          const existingSub = await reg.pushManager.getSubscription();
+          if (!existingSub && vapidPublicKey) {
+            const sub = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+            });
+            socket.emit('save-subscription', sub);
+          }
+        }
+      } catch (err) {
+        console.error("Erreur Push:", err);
+      }
+    }
+
+    function urlBase64ToUint8Array(base64String) {
+      const padding = '='.repeat((4 - base64String.length % 4) % 4);
+      const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
     }
 
     window.addEventListener('DOMContentLoaded', () => {
@@ -190,6 +219,8 @@
           currentUser = username;
           localStorage.setItem('chat_username', username);
           localStorage.setItem('chat_passhash', passHash);
+
+          registerPushNotifications(res.vapidPublicKey);
 
           document.getElementById('auth-modal').classList.add('hidden');
           document.getElementById('app-interface').classList.remove('hidden');
@@ -262,7 +293,6 @@
       const chatFooter = document.getElementById('chat-footer');
       chatFooter.classList.remove('hidden');
 
-      // Si c'est le patchnote et que l'utilisateur n'est ni Wifmat ni Vortex, on masque la barre d'écriture
       const allowedAdmins = ['Wifmat', 'Vortex'];
       const isAdmin = allowedAdmins.some(admin => admin.toLowerCase() === currentUser.toLowerCase());
 
@@ -297,7 +327,6 @@
     }
 
     function renderConversationsList() {
-      // 1. Rendu du canal Patchnote en haut
       const channelsEl = document.getElementById('channels-list');
       channelsEl.innerHTML = "";
 
@@ -318,7 +347,6 @@
       `;
       channelsEl.appendChild(patchnoteBtn);
 
-      // 2. Rendu des conversations privées habituelles
       const listEl = document.getElementById('conversations-list');
       listEl.innerHTML = "";
 
@@ -380,7 +408,6 @@
           msg.isMe ? 'bg-emerald-500 text-slate-950 rounded-br-none font-medium' : 'bg-slate-900 border border-slate-800 text-slate-100 rounded-bl-none'
         }`;
 
-        // Si c'est le patchnote et que ce n'est pas nous, afficher le nom de l'auteur au-dessus
         if (activeRecipient === 'patchnote' && !msg.isMe) {
           const authorDiv = document.createElement('div');
           authorDiv.className = 'text-[10px] font-bold text-emerald-400 mb-0.5';
