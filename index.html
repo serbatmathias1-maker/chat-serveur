@@ -49,12 +49,11 @@
     </div>
   </div>
 
-  <!-- INTERFACE PRINCIPALE DE CHAT STYLE DISCORD -->
+  <!-- INTERFACE PRINCIPALE STYLE DISCORD -->
   <div id="app-interface" class="hidden flex-1 h-full flex overflow-hidden">
     
-    <!-- BARRE LATÉRALE (LISTE DES CONVERSATIONS MP) -->
+    <!-- BARRE LATÉRALE -->
     <aside id="sidebar" class="w-full md:w-80 bg-slate-900 border-r border-slate-800 flex flex-col shrink-0 h-full">
-      <!-- User profile header -->
       <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
         <div class="flex items-center space-x-3">
           <div class="w-10 h-10 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center font-bold">
@@ -63,7 +62,7 @@
           <div>
             <h1 id="user-display" class="font-bold text-sm">Chargement...</h1>
             <span class="inline-flex items-center text-[10px] text-emerald-400">
-              <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 animate-pulse"></span> Chiffré E2EE
+              <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 animate-pulse"></span> Sauvegardé en BDD
             </span>
           </div>
         </div>
@@ -72,7 +71,6 @@
         </button>
       </div>
 
-      <!-- Ajouter une nouvelle conversation -->
       <div class="p-3 border-b border-slate-800/60">
         <form onsubmit="startNewChat(event)" class="flex items-center space-x-2">
           <input type="text" id="new-chat-input" placeholder="Pseudo de l'ami..." required class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
@@ -82,16 +80,12 @@
         </form>
       </div>
 
-      <!-- Liste des salons MP -->
       <div class="p-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Messages Privés</div>
-      <div id="conversations-list" class="flex-1 overflow-y-auto px-2 space-y-1">
-        <!-- Généré dynamiquement -->
-      </div>
+      <div id="conversations-list" class="flex-1 overflow-y-auto px-2 space-y-1"></div>
     </aside>
 
     <!-- ZONE DE DISCUSSION PRINCIPALE -->
     <main id="chat-window" class="hidden md:flex flex-1 flex-col h-full bg-slate-950">
-      <!-- En-tête de la conversation active -->
       <header id="chat-header" class="bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between shrink-0">
         <div class="flex items-center space-x-3">
           <button onclick="showSidebarOnMobile()" class="md:hidden text-slate-400 p-1 mr-1">
@@ -102,12 +96,11 @@
           </div>
           <div>
             <h2 id="active-chat-name" class="font-bold text-sm">Sélectionnez une discussion</h2>
-            <p id="active-chat-status" class="text-[10px] text-slate-400">Discussion directe sécurisée</p>
+            <p id="active-chat-status" class="text-[10px] text-slate-400">Chiffrement E2EE actif</p>
           </div>
         </div>
       </header>
 
-      <!-- Zone d'affichage des messages -->
       <div id="chat-box" class="flex-1 overflow-y-auto p-4 space-y-3">
         <div id="no-chat-selected" class="h-full flex flex-col items-center justify-center text-slate-500 space-y-2">
           <i class="fa-regular fa-comments text-4xl"></i>
@@ -115,7 +108,6 @@
         </div>
       </div>
 
-      <!-- Barre d'envoi -->
       <footer id="chat-footer" class="bg-slate-900 border-t border-slate-800 p-3 shrink-0 hidden">
         <form id="chat-form" onsubmit="sendMessage(event)" class="flex items-center space-x-2">
           <input type="text" id="message-input" placeholder="Envoyer un message..." required autocomplete="off" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
@@ -137,7 +129,6 @@
     let isLoginMode = true;
     let activeRecipient = null;
 
-    // Structure de stockage locale des messages : { "pseudo": [ { sender, text, isMe, timestamp } ] }
     const chats = {};
 
     // --- CHIFFREMENT (WEB CRYPTO API) ---
@@ -179,7 +170,7 @@
         );
         return new TextDecoder().decode(decrypted);
       } catch (e) {
-        return "⚠️ Message indisponible";
+        return "⚠️ Impossible de déchiffrer ce message";
       }
     }
 
@@ -216,11 +207,16 @@
           document.getElementById('user-display').innerText = username;
           document.getElementById('user-avatar').innerText = username[0].toUpperCase();
 
-          // Messages hors-ligne livrés par le serveur
-          if (res.messages && res.messages.length > 0) {
-            for (const msg of res.messages) {
+          // Charger et reconstruire TOUTES les conversations et messages depuis l'historique BDD
+          if (res.history && res.history.length > 0) {
+            for (const msg of res.history) {
               const text = await decryptPayload(msg.encryptedPayload, userKey);
-              storeMessage(msg.sender, msg.sender, text, false);
+              const peer = (msg.sender === currentUser) ? msg.recipient : msg.sender;
+              const isMe = (msg.sender === currentUser);
+              const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              
+              if (!chats[peer]) chats[peer] = [];
+              chats[peer].push({ sender: msg.sender, text, isMe, time });
             }
           }
           renderConversationsList();
@@ -236,7 +232,7 @@
       location.reload();
     }
 
-    // --- GESTION DES CONVERSATIONS & MP ---
+    // --- INTERFACE & LOGIQUE CHAT ---
     function startNewChat(e) {
       e.preventDefault();
       const input = document.getElementById('new-chat-input');
@@ -244,9 +240,7 @@
       
       if (!targetUser || targetUser === currentUser) return;
 
-      if (!chats[targetUser]) {
-        chats[targetUser] = [];
-      }
+      if (!chats[targetUser]) chats[targetUser] = [];
       input.value = "";
       selectChat(targetUser);
     }
@@ -259,7 +253,6 @@
       document.getElementById('active-chat-avatar').innerText = recipient[0].toUpperCase();
       document.getElementById('chat-footer').classList.remove('hidden');
 
-      // Masquer/Afficher sur mobile
       const sidebar = document.getElementById('sidebar');
       const chatWindow = document.getElementById('chat-window');
       
@@ -279,11 +272,10 @@
 
     function storeMessage(peer, sender, text, isMe) {
       if (!chats[peer]) chats[peer] = [];
-      chats[peer].push({ sender, text, isMe, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) });
+      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      chats[peer].push({ sender, text, isMe, time });
       
-      if (activeRecipient === peer) {
-        renderMessages();
-      }
+      if (activeRecipient === peer) renderMessages();
       renderConversationsList();
     }
 
@@ -365,7 +357,7 @@
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    // --- ENVOI / RÉCEPTION SOCKET ---
+    // --- ENVOI / RÉCEPTION ---
     async function sendMessage(e) {
       e.preventDefault();
       if (!activeRecipient) return;
