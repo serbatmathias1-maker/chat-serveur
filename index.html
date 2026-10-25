@@ -283,7 +283,6 @@
         alert("Veuillez d'abord renseigner et enregistrer un nom de canal !");
         return;
       }
-      // Ouvre directement le canal dans l'application ou le navigateur
       window.open(`https://ntfy.sh/${ntfyTopic}`, '_blank');
     }
 
@@ -421,8 +420,8 @@
       if (msgs.length === 0) {
         chatBox.innerHTML = `
           <div class="h-full flex flex-col items-center justify-center text-slate-600 space-y-1">
-            <p class="text-xs">C'est le début de ce canal <span class="text-emerald-400 font-bold">#patchnote</span></p>
-            <p class="text-[10px]">Aucune mise à jour publiée pour l'instant.</p>
+            <p class="text-xs">C'est le début de cette discussion</p>
+            <p class="text-[10px]">Envoyez votre premier message !</p>
           </div>
         `;
         return;
@@ -492,6 +491,28 @@
         storeMessage(peer, data.sender, data.text, isMe);
       }
     });
+
+    // --- GESTION DE L'INACTIVITÉ (5 SECONDES) ---
+    let inactivityTimer;
+
+    function resetInactivityTimer() {
+      clearTimeout(inactivityTimer);
+      
+      if (socket.connected) {
+        socket.emit('user-active');
+      }
+
+      inactivityTimer = setTimeout(() => {
+        if (socket.connected) {
+          socket.emit('user-inactive');
+        }
+      }, 5000); // 5000 ms = 5 secondes d'inactivité avant passage hors-ligne pour les notifs
+    }
+
+    window.addEventListener('mousemove', resetInactivityTimer);
+    window.addEventListener('keypress', resetInactivityTimer);
+    window.addEventListener('click', resetInactivityTimer);
+    window.addEventListener('touchstart', resetInactivityTimer);
   </script>
 </body>
 </html>
