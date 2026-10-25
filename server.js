@@ -85,6 +85,21 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Gestion de l'inactivité (5 secondes sans action = hors ligne pour les notifs)
+  socket.on('user-active', () => {
+    const username = socket.data.username;
+    if (username) {
+      userSockets[username] = socket.id;
+    }
+  });
+
+  socket.on('user-inactive', () => {
+    const username = socket.data.username;
+    if (username && userSockets[username] === socket.id) {
+      delete userSockets[username]; // Retire temporairement pour déclencher ntfy
+    }
+  });
+
   socket.on('update-ntfy', async ({ ntfyTopic }, callback) => {
     const username = socket.data.username;
     if (!username) return callback({ success: false, message: "Non authentifié" });
@@ -125,6 +140,7 @@ io.on('connection', (socket) => {
         if (recipientSocketId) {
           io.to(recipientSocketId).emit('new-message', { sender, recipient: sender, text, timestamp: newMsg.timestamp });
         } else {
+          // Destinataire hors ligne ou inactif depuis 5s -> Alerte ntfy
           const recipientUser = await User.findOne({ username: recipient });
           if (recipientUser && recipientUser.ntfyTopic) {
             sendNtfyAlert(recipientUser.ntfyTopic, `Message de @${sender}`, `${sender} : "${text}"`);
