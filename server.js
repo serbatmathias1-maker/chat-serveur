@@ -13,7 +13,7 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log("✅ Connecté à MongoDB Atlas !"))
   .catch(err => console.error("❌ Erreur MongoDB:", err));
 
-// Fonction pour envoyer une notification push via ntfy.sh (sans émojis dans les headers)
+// Fonction pour envoyer une notification push via ntfy.sh
 function sendNtfyAlert(topic, title, message) {
   if (!topic) return;
   fetch(`https://ntfy.sh/${topic}`, {
@@ -21,7 +21,8 @@ function sendNtfyAlert(topic, title, message) {
     body: message,
     headers: {
       'Title': title,
-      'Priority': 'high'
+      'Priority': 'high',
+      'Click': 'https://serbatmathias1-maker.github.io/chat-serveur/'
     }
   }).catch(err => console.error("Erreur ntfy:", err));
 }
