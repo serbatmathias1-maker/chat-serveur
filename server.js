@@ -21,8 +21,7 @@ function sendNtfyAlert(topic, title, message) {
     body: message,
     headers: {
       'Title': title,
-      'Priority': 'high',
-      'Tags': 'speech_balloon'
+      'Priority': 'high'
     }
   }).catch(err => console.error("Erreur ntfy:", err));
 }
