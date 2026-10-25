@@ -7,13 +7,15 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
+// Augmentation de la limite de taille pour accepter l'envoi de photos/vocaux en base64
+app.use(express.json({ limit: '10mb' }));
+
 const MONGO_URI = "mongodb+srv://adminchat:MonPass1234@chat.5mznug4.mongodb.net/chat?retryWrites=true&w=majority";
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log("✅ Connecté à MongoDB Atlas !"))
   .catch(err => console.error("❌ Erreur MongoDB:", err));
 
-// Fonction pour envoyer une notification push via ntfy.sh
 function sendNtfyAlert(topic, title, message) {
   if (!topic) return;
   fetch(`https://ntfy.sh/${topic}`, {
@@ -36,11 +38,13 @@ const User = mongoose.model('User', new mongoose.Schema({
 const Message = mongoose.model('Message', new mongoose.Schema({
   sender: { type: String, required: true },
   recipient: { type: String, required: true },
-  text: { type: String, required: true },
+  text: { type: String, required: true }, // Contient le texte, ou l'URL/Base64 de l'image/vocal
+  type: { type: String, default: 'text' }, // 'text', 'image', ou 'audio'
   timestamp: { type: Date, default: Date.now }
 }));
 
 const userSockets = {};
+const onlineUsers = new Set();
 
 app.get('/ping', (req, res) => res.send('pong'));
 
@@ -55,6 +59,9 @@ io.on('connection', (socket) => {
       
       socket.data.username = username;
       userSockets[username] = socket.id;
+      onlineUsers.add(username);
+      io.emit('presence-update', Array.from(onlineUsers));
+
       callback({ success: true });
     } catch (err) {
       callback({ success: false, message: "Erreur lors de l'inscription." });
@@ -70,6 +77,8 @@ io.on('connection', (socket) => {
 
       socket.data.username = username;
       userSockets[username] = socket.id;
+      onlineUsers.add(username);
+      io.emit('presence-update', Array.from(onlineUsers));
 
       const history = await Message.find({
         $or: [
@@ -85,18 +94,41 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Gestion de l'inactivité (5 secondes sans action = hors ligne pour les notifs)
+  // Gestion de l'inactivité (5 secondes)
   socket.on('user-active', () => {
     const username = socket.data.username;
     if (username) {
       userSockets[username] = socket.id;
+      if (!onlineUsers.has(username)) {
+        onlineUsers.add(username);
+        io.emit('presence-update', Array.from(onlineUsers));
+      }
     }
   });
 
   socket.on('user-inactive', () => {
     const username = socket.data.username;
     if (username && userSockets[username] === socket.id) {
-      delete userSockets[username]; // Retire temporairement pour déclencher ntfy
+      delete userSockets[username];
+      onlineUsers.delete(username);
+      io.emit('presence-update', Array.from(onlineUsers));
+    }
+  });
+
+  // Indicateur de saisie ("En train d'écrire...")
+  socket.on('typing', ({ recipient }) => {
+    const sender = socket.data.username;
+    const recipientSocketId = userSockets[recipient];
+    if (recipientSocketId) {
+      io.to(recipientSocketId).emit('user-typing', { sender });
+    }
+  });
+
+  socket.on('stop-typing', ({ recipient }) => {
+    const sender = socket.data.username;
+    const recipientSocketId = userSockets[recipient];
+    if (recipientSocketId) {
+      io.to(recipientSocketId).emit('user-stop-typing', { sender });
     }
   });
 
@@ -111,10 +143,12 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('send-message', async ({ recipient, text }, callback) => {
+  socket.on('send-message', async ({ recipient, text, type }, callback) => {
     try {
       const sender = socket.data.username || Object.keys(userSockets).find(user => userSockets[user] === socket.id);
       if (!sender) return callback({ success: false, message: "Non authentifié." });
+
+      const msgType = type || 'text';
 
       if (recipient === 'patchnote') {
         const allowedAdmins = ['Wifmat', 'Vortex'];
@@ -123,27 +157,35 @@ io.on('connection', (socket) => {
         }
       }
 
-      const newMsg = new Message({ sender, recipient, text });
+      const newMsg = new Message({ sender, recipient, text, type: msgType });
       await newMsg.save();
 
+      const messagePayload = { 
+        sender, 
+        recipient: recipient === 'patchnote' ? 'patchnote' : sender, 
+        text, 
+        type: msgType, 
+        timestamp: newMsg.timestamp 
+      };
+
       if (recipient === 'patchnote') {
-        io.emit('new-message', { sender, recipient: 'patchnote', text, timestamp: newMsg.timestamp });
+        io.emit('new-message', { ...messagePayload, recipient: 'patchnote' });
         
         const usersWithNtfy = await User.find({ ntfyTopic: { $ne: "" } });
         usersWithNtfy.forEach(u => {
           if (u.username !== sender) {
-            sendNtfyAlert(u.ntfyTopic, "Nouveau patchnote", `${sender} a publié : ${text}`);
+            sendNtfyAlert(u.ntfyTopic, "Nouveau patchnote", `${sender} a publié un patchnote.`);
           }
         });
       } else {
         const recipientSocketId = userSockets[recipient];
         if (recipientSocketId) {
-          io.to(recipientSocketId).emit('new-message', { sender, recipient: sender, text, timestamp: newMsg.timestamp });
+          io.to(recipientSocketId).emit('new-message', messagePayload);
         } else {
-          // Destinataire hors ligne ou inactif depuis 5s -> Alerte ntfy
           const recipientUser = await User.findOne({ username: recipient });
           if (recipientUser && recipientUser.ntfyTopic) {
-            sendNtfyAlert(recipientUser.ntfyTopic, `Message de @${sender}`, `${sender} : "${text}"`);
+            let previewText = msgType === 'image' ? '[Photo]' : (msgType === 'audio' ? '[Message vocal]' : text);
+            sendNtfyAlert(recipientUser.ntfyTopic, `Message de @${sender}`, `${sender} : "${previewText}"`);
           }
         }
       }
@@ -155,11 +197,11 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    for (const [user, id] of Object.entries(userSockets)) {
-      if (id === socket.id) {
-        delete userSockets[user];
-        break;
-      }
+    const username = socket.data.username;
+    if (username) {
+      delete userSockets[username];
+      onlineUsers.delete(username);
+      io.emit('presence-update', Array.from(onlineUsers));
     }
   });
 });
