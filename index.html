@@ -35,11 +35,10 @@
           <input type="password" id="auth-password" required class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors">
         </div>
 
-        <!-- Champ Canal Ntfy Optionnel (inscription) -->
         <div id="ntfy-field-container" class="hidden">
           <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Nom du canal Ntfy <span class="text-slate-500 lowercase">(optionnel)</span></label>
           <input type="text" id="auth-ntfy" placeholder="ex: mon-chat-secret-xyz" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors">
-          <p class="text-[10px] text-slate-500 mt-1">Nécessaire pour recevoir les alertes sonores hors-ligne.</p>
+          <p class="text-[10px] text-slate-500 mt-1">Nécessaire pour recevoir les alertes hors-ligne.</p>
         </div>
 
         <button type="submit" id="auth-submit-btn" class="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold py-3 px-4 rounded-xl shadow-lg transition-all active:scale-[0.98]">
@@ -56,7 +55,7 @@
     </div>
   </div>
 
-  <!-- INTERFACE DISCORD -->
+  <!-- INTERFACE PRINCIPALE -->
   <div id="app-interface" class="hidden flex-1 h-full flex overflow-hidden">
     
     <!-- BARRE LATÉRALE -->
@@ -78,7 +77,6 @@
         </button>
       </div>
 
-      <!-- Paramètres de notification Ntfy & Téléchargement Appli -->
       <div class="p-3 border-b border-slate-800/60 bg-slate-950/40 space-y-2">
         <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Canal d'alerte (Ntfy)</div>
         <div class="flex items-center space-x-2">
@@ -87,8 +85,6 @@
             <i class="fa-solid fa-floppy-disk"></i>
           </button>
         </div>
-        
-        <!-- Boutons d'aide et de redirection directe vers l'appli ntfy -->
         <div class="flex items-center space-x-2 pt-1">
           <a href="https://ntfy.sh" target="_blank" class="flex-1 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 text-center py-1.5 rounded-xl text-[11px] font-semibold transition-colors">
             <i class="fa-solid fa-download mr-1"></i> Appli Ntfy
@@ -127,7 +123,7 @@
           </div>
           <div>
             <h2 id="active-chat-name" class="font-bold text-sm">Sélectionnez une discussion</h2>
-            <p id="active-chat-status" class="text-[10px] text-slate-400">Discussion directe</p>
+            <p id="active-chat-status" class="text-[10px] text-slate-400">Hors ligne</p>
           </div>
         </div>
       </header>
@@ -139,9 +135,22 @@
         </div>
       </div>
 
+      <!-- Footer d'envoi avec boutons Photo et Vocal -->
       <footer id="chat-footer" class="bg-slate-900 border-t border-slate-800 p-3 shrink-0 hidden">
         <form id="chat-form" onsubmit="sendMessage(event)" class="flex items-center space-x-2">
-          <input type="text" id="message-input" placeholder="Envoyer un message..." required autocomplete="off" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
+          <!-- Input photo caché -->
+          <input type="file" id="image-input" accept="image/*" class="hidden" onchange="handleImageUpload(event)">
+          <button type="button" onclick="document.getElementById('image-input').click()" class="text-slate-400 hover:text-emerald-400 p-2 transition-colors" title="Envoyer une photo">
+            <i class="fa-solid fa-image text-lg"></i>
+          </button>
+
+          <!-- Bouton vocal -->
+          <button type="button" id="mic-btn" onclick="toggleVoiceRecording()" class="text-slate-400 hover:text-red-400 p-2 transition-colors" title="Enregistrer un vocal">
+            <i class="fa-solid fa-microphone text-lg" id="mic-icon"></i>
+          </button>
+
+          <input type="text" id="message-input" placeholder="Envoyer un message..." autocomplete="off" oninput="handleTypingInput()" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
+          
           <button type="submit" id="send-btn" class="bg-emerald-500 text-slate-950 p-2.5 rounded-xl font-bold flex items-center justify-center hover:bg-emerald-400 active:scale-95 transition-all">
             <i class="fa-solid fa-paper-plane text-sm"></i>
           </button>
@@ -159,6 +168,16 @@
     let isLoginMode = true;
     let activeRecipient = null;
     const chats = { 'patchnote': [] };
+    const unreadCounts = {}; // Compteurs de messages non lus par conversation
+    const onlineUsersList = new Set();
+
+    let typingTimeout;
+    let isTyping = false;
+
+    // Gestion enregistrement vocal
+    let mediaRecorder;
+    let audioChunks = [];
+    let isRecording = false;
 
     async function hashPassword(password) {
       const enc = new TextEncoder();
@@ -187,7 +206,6 @@
       } else {
         ntfyContainer.classList.remove('hidden');
       }
-
       document.getElementById('auth-error').classList.add('hidden');
     }
 
@@ -241,14 +259,14 @@
               if (msg.recipient === 'patchnote') {
                 const isMe = (msg.sender === currentUser);
                 const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                chats['patchnote'].push({ sender: msg.sender, text: msg.text, isMe, time });
+                chats['patchnote'].push({ sender: msg.sender, text: msg.text, type: msg.type || 'text', isMe, time });
               } else {
                 const peer = (msg.sender === currentUser) ? msg.recipient : msg.sender;
                 const isMe = (msg.sender === currentUser);
                 const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 
                 if (!chats[peer]) chats[peer] = [];
-                chats[peer].push({ sender: msg.sender, text: msg.text, isMe, time });
+                chats[peer].push({ sender: msg.sender, text: msg.text, type: msg.type || 'text', isMe, time });
               }
             }
           }
@@ -269,11 +287,8 @@
     function saveNtfySetting() {
       const ntfyTopic = document.getElementById('settings-ntfy').value.trim();
       socket.emit('update-ntfy', { ntfyTopic }, (res) => {
-        if (res.success) {
-          alert("Canal d'alerte mis à jour avec succès !");
-        } else {
-          alert("Erreur lors de la mise à jour.");
-        }
+        if (res.success) alert("Canal d'alerte mis à jour avec succès !");
+        else alert("Erreur lors de la mise à jour.");
       });
     }
 
@@ -313,11 +328,16 @@
     function selectChat(recipient) {
       activeRecipient = recipient;
       if (!chats[recipient]) chats[recipient] = [];
+      
+      // Remet à zéro les notifications non lues pour cette conv
+      unreadCounts[recipient] = 0;
 
       const isPatchnote = (recipient === 'patchnote');
       document.getElementById('active-chat-name').innerText = isPatchnote ? "#patchnote" : `@${recipient}`;
       document.getElementById('active-chat-avatar').innerText = isPatchnote ? "#" : recipient[0].toUpperCase();
       
+      updateActiveChatStatusHeader();
+
       const chatFooter = document.getElementById('chat-footer');
       chatFooter.classList.remove('hidden');
 
@@ -339,16 +359,45 @@
       renderConversationsList();
     }
 
+    function updateActiveChatStatusHeader() {
+      const statusEl = document.getElementById('active-chat-status');
+      if (!activeRecipient || activeRecipient === 'patchnote') {
+        statusEl.innerText = "Canal d'annonces officielles";
+        statusEl.className = "text-[10px] text-slate-400";
+        return;
+      }
+
+      if (onlineUsersList.has(activeRecipient)) {
+        statusEl.innerHTML = `<span class="inline-block w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1"></span> En ligne`;
+        statusEl.className = "text-[10px] text-emerald-400 font-semibold";
+      } else {
+        statusEl.innerText = "Hors ligne";
+        statusEl.className = "text-[10px] text-slate-500";
+      }
+    }
+
     function showSidebarOnMobile() {
       document.getElementById('sidebar').classList.remove('hidden');
       document.getElementById('chat-window').classList.add('hidden');
       document.getElementById('chat-window').classList.remove('flex');
     }
 
-    function storeMessage(targetKey, sender, text, isMe) {
+    function storeMessage(targetKey, sender, text, type, isMe) {
       if (!chats[targetKey]) chats[targetKey] = [];
       const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      chats[targetKey].push({ sender, text, isMe, time });
+      chats[targetKey].push({ sender, text, type: type || 'text', isMe, time });
+
+      // Si le message vient de quelqu'un d'autre et que ce n'est pas la conv active, on incrémente le badge "1" (ou plus)
+      if (sender !== currentUser && activeRecipient !== targetKey) {
+        unreadCounts[targetKey] = (unreadCounts[targetKey] || 0) + 1;
+      }
+
+      // Si c'est un message entrant, on fait remonter la conversation tout en haut
+      if (targetKey !== 'patchnote' && sender !== currentUser) {
+        const temp = chats[targetKey];
+        delete chats[targetKey];
+        chats[targetKey] = temp;
+      }
       
       if (activeRecipient === targetKey) renderMessages();
       renderConversationsList();
@@ -365,9 +414,7 @@
         isPatchnoteActive ? 'bg-slate-800 text-slate-100 font-semibold' : 'hover:bg-slate-800/50 text-slate-400'
       }`;
       patchnoteBtn.innerHTML = `
-        <div class="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs shrink-0">
-          #
-        </div>
+        <div class="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs shrink-0">#</div>
         <div class="flex-1 overflow-hidden">
           <div class="text-xs font-bold truncate text-slate-200">patchnote</div>
           <div class="text-[11px] text-slate-500 truncate">Mises à jour officielles</div>
@@ -387,8 +434,17 @@
 
       peers.forEach(peer => {
         const msgs = chats[peer];
-        const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1].text : "Nouvelle conversation";
+        const lastMsgObj = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+        let lastMsgText = "Nouvelle conversation";
+        if (lastMsgObj) {
+          if (lastMsgObj.type === 'image') lastMsgText = "[Photo]";
+          else if (lastMsgObj.type === 'audio') lastMsgText = "[Message vocal]";
+          else lastMsgText = lastMsgObj.text;
+        }
+
         const isActive = peer === activeRecipient;
+        const unread = unreadCounts[peer] || 0;
+        const isOnline = onlineUsersList.has(peer);
 
         const btn = document.createElement('button');
         btn.onclick = () => selectChat(peer);
@@ -397,13 +453,17 @@
         }`;
 
         btn.innerHTML = `
-          <div class="w-8 h-8 rounded-full ${isActive ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-300'} flex items-center justify-center font-bold text-xs shrink-0">
-            ${peer[0].toUpperCase()}
+          <div class="relative shrink-0">
+            <div class="w-8 h-8 rounded-full ${isActive ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-300'} flex items-center justify-center font-bold text-xs">
+              ${peer[0].toUpperCase()}
+            </div>
+            ${isOnline ? '<span class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-slate-900 rounded-full"></span>' : ''}
           </div>
           <div class="flex-1 overflow-hidden">
             <div class="text-xs font-bold truncate text-slate-200">@${peer}</div>
-            <div class="text-[11px] text-slate-500 truncate">${lastMsg}</div>
+            <div class="text-[11px] text-slate-500 truncate">${lastMsgText}</div>
           </div>
+          ${unread > 0 ? `<div class="bg-emerald-500 text-slate-950 font-bold text-[10px] w-5 h-5 rounded-full flex items-center justify-center shrink-0">${unread}</div>` : ''}
         `;
         listEl.appendChild(btn);
       });
@@ -443,14 +503,29 @@
           bubble.appendChild(authorDiv);
         }
 
-        const textDiv = document.createElement('div');
-        textDiv.innerText = msg.text;
+        // Gestion de l'affichage selon le type de message (Texte, Image ou Vocal)
+        if (msg.type === 'image') {
+          const img = document.createElement('img');
+          img.src = msg.text;
+          img.className = 'rounded-lg max-h-48 object-cover cursor-pointer mt-1 mb-1';
+          img.onclick = () => window.open(msg.text);
+          bubble.appendChild(img);
+        } else if (msg.type === 'audio') {
+          const audio = document.createElement('audio');
+          audio.src = msg.text;
+          audio.controls = true;
+          audio.className = 'max-w-full h-8 mt-1 mb-1';
+          bubble.appendChild(audio);
+        } else {
+          const textDiv = document.createElement('div');
+          textDiv.innerText = msg.text;
+          bubble.appendChild(textDiv);
+        }
 
         const timeDiv = document.createElement('div');
         timeDiv.className = `text-[9px] mt-1 text-right ${msg.isMe ? 'text-slate-800' : 'text-slate-500'}`;
         timeDiv.innerText = msg.time;
 
-        bubble.appendChild(textDiv);
         bubble.appendChild(timeDiv);
         wrapper.appendChild(bubble);
         chatBox.appendChild(wrapper);
@@ -459,36 +534,133 @@
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
+    // --- ENVOI DE MESSAGE ---
     async function sendMessage(e) {
       e.preventDefault();
       if (!activeRecipient) return;
 
       const messageInput = document.getElementById('message-input');
       const text = messageInput.value.trim();
-
       if (!text) return;
 
-      socket.emit('send-message', { recipient: activeRecipient, text }, (res) => {
+      socket.emit('send-message', { recipient: activeRecipient, text, type: 'text' }, (res) => {
         if (res && res.success) {
-          if (activeRecipient === 'patchnote') {
-            storeMessage('patchnote', currentUser, text, true);
-          } else {
-            storeMessage(activeRecipient, currentUser, text, true);
-          }
+          storeMessage(activeRecipient, currentUser, text, 'text', true);
           messageInput.value = "";
+          socket.emit('stop-typing', { recipient: activeRecipient });
         } else {
           alert(res ? res.message : "Erreur d'envoi du message.");
         }
       });
     }
 
+    // --- ENVOI DE PHOTO ---
+    function handleImageUpload(event) {
+      const file = event.target.files[0];
+      if (!file || !activeRecipient) return;
+
+      const reader = new FileReader();
+      reader.onload = function(uploadEvent) {
+        const base64Image = uploadEvent.target.result;
+        socket.emit('send-message', { recipient: activeRecipient, text: base64Image, type: 'image' }, (res) => {
+          if (res && res.success) {
+            storeMessage(activeRecipient, currentUser, base64Image, 'image', true);
+          } else {
+            alert("Erreur lors de l'envoi de l'image.");
+          }
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // --- ENVOI DE VOCAL ---
+    async function toggleVoiceRecording() {
+      const micIcon = document.getElementById('mic-icon');
+      const micBtn = document.getElementById('mic-btn');
+
+      if (!isRecording) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream);
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = event => {
+            audioChunks.push(event.data);
+          };
+
+          mediaRecorder.onstop = async () => {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            const reader = new FileReader();
+            reader.readAsDataURL(audioBlob);
+            reader.onloadend = function() {
+              const base64Audio = reader.result;
+              socket.emit('send-message', { recipient: activeRecipient, text: base64Audio, type: 'audio' }, (res) => {
+                if (res && res.success) {
+                  storeMessage(activeRecipient, currentUser, base64Audio, 'audio', true);
+                }
+              });
+            };
+          };
+
+          mediaRecorder.start();
+          isRecording = true;
+          micIcon.className = "fa-solid fa-stop text-lg animate-bounce text-red-500";
+          micBtn.title = "Arrêter et envoyer";
+        } catch (err) {
+          alert("Impossible d'accéder au microphone.");
+        }
+      } else {
+        mediaRecorder.stop();
+        isRecording = false;
+        micIcon.className = "fa-solid fa-microphone text-lg";
+        micBtn.title = "Enregistrer un vocal";
+      }
+    }
+
+    // --- INDICATEUR DE SAISIE ---
+    function handleTypingInput() {
+      if (!activeRecipient || activeRecipient === 'patchnote') return;
+
+      if (!isTyping) {
+        isTyping = true;
+        socket.emit('typing', { recipient: activeRecipient });
+      }
+
+      clearTimeout(typingTimeout);
+      typingTimeout = setTimeout(() => {
+        isTyping = false;
+        socket.emit('stop-typing', { recipient: activeRecipient });
+      }, 1500);
+    }
+
+    // Écouteurs Socket.io globaux
     socket.on('new-message', (data) => {
       const isMe = (data.sender === currentUser);
       if (data.recipient === 'patchnote') {
-        storeMessage('patchnote', data.sender, data.text, isMe);
+        storeMessage('patchnote', data.sender, data.text, data.type, isMe);
       } else {
         const peer = isMe ? activeRecipient : data.sender;
-        storeMessage(peer, data.sender, data.text, isMe);
+        storeMessage(peer, data.sender, data.text, data.type, isMe);
+      }
+    });
+
+    socket.on('presence-update', (users) => {
+      onlineUsersList.clear();
+      users.forEach(u => onlineUsersList.add(u));
+      updateActiveChatStatusHeader();
+      renderConversationsList();
+    });
+
+    socket.on('user-typing', ({ sender }) => {
+      if (activeRecipient === sender) {
+        document.getElementById('active-chat-status').innerText = "En train d'écrire...";
+        document.getElementById('active-chat-status').className = "text-[10px] text-emerald-400 italic animate-pulse";
+      }
+    });
+
+    socket.on('user-stop-typing', ({ sender }) => {
+      if (activeRecipient === sender) {
+        updateActiveChatStatusHeader();
       }
     });
 
@@ -497,7 +669,6 @@
 
     function resetInactivityTimer() {
       clearTimeout(inactivityTimer);
-      
       if (socket.connected) {
         socket.emit('user-active');
       }
@@ -506,7 +677,7 @@
         if (socket.connected) {
           socket.emit('user-inactive');
         }
-      }, 5000); // 5000 ms = 5 secondes d'inactivité avant passage hors-ligne pour les notifs
+      }, 5000);
     }
 
     window.addEventListener('mousemove', resetInactivityTimer);
