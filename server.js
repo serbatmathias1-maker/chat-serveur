@@ -13,7 +13,7 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log("✅ Connecté à MongoDB Atlas !"))
   .catch(err => console.error("❌ Erreur MongoDB:", err));
 
-// Fonction pour envoyer une notification push via ntfy.sh
+// Fonction pour envoyer une notification push via ntfy.sh (sans émojis dans les headers)
 function sendNtfyAlert(topic, title, message) {
   if (!topic) return;
   fetch(`https://ntfy.sh/${topic}`, {
@@ -29,7 +29,7 @@ function sendNtfyAlert(topic, title, message) {
 const User = mongoose.model('User', new mongoose.Schema({
   username: { type: String, unique: true, required: true },
   passwordHash: { type: String, required: true },
-  ntfyTopic: { type: String, default: "" } // Canal ntfy personnel de l'utilisateur
+  ntfyTopic: { type: String, default: "" }
 }));
 
 const Message = mongoose.model('Message', new mongoose.Schema({
@@ -84,7 +84,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Mise à jour du canal ntfy une fois connecté
   socket.on('update-ntfy', async ({ ntfyTopic }, callback) => {
     const username = socket.data.username;
     if (!username) return callback({ success: false, message: "Non authentifié" });
@@ -114,11 +113,10 @@ io.on('connection', (socket) => {
       if (recipient === 'patchnote') {
         io.emit('new-message', { sender, recipient: 'patchnote', text, timestamp: newMsg.timestamp });
         
-        // Notifier tous les utilisateurs abonnés à ntfy
         const usersWithNtfy = await User.find({ ntfyTopic: { $ne: "" } });
         usersWithNtfy.forEach(u => {
           if (u.username !== sender) {
-            sendNtfyAlert(u.ntfyTopic, "📢 Nouveau #patchnote", `${sender} a publié : ${text}`);
+            sendNtfyAlert(u.ntfyTopic, "Nouveau patchnote", `${sender} a publié : ${text}`);
           }
         });
       } else {
@@ -126,10 +124,9 @@ io.on('connection', (socket) => {
         if (recipientSocketId) {
           io.to(recipientSocketId).emit('new-message', { sender, recipient: sender, text, timestamp: newMsg.timestamp });
         } else {
-          // Destinataire hors ligne -> Alerte ntfy
           const recipientUser = await User.findOne({ username: recipient });
           if (recipientUser && recipientUser.ntfyTopic) {
-            sendNtfyAlert(recipientUser.ntfyTopic, `💬 Message de @${sender}`, `${sender} : "${text}"`);
+            sendNtfyAlert(recipientUser.ntfyTopic, `Message de @${sender}`, `${sender} : "${text}"`);
           }
         }
       }
@@ -149,6 +146,9 @@ io.on('connection', (socket) => {
     }
   });
 });
+
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, () => console.log(`Serveur actif sur le port ${PORT}`));
 
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log(`Serveur actif sur le port ${PORT}`));
