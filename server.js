@@ -2,7 +2,6 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
-const nodemailer = require('nodemailer');
 
 const app = express();
 const server = http.createServer(app);
@@ -14,33 +13,24 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log("✅ Connecté à MongoDB Atlas !"))
   .catch(err => console.error("❌ Erreur MongoDB:", err));
 
-// Configuration de l'expéditeur d'emails (Tu peux mettre tes identifiants Gmail/SMTP)
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER || 'ton.email@gmail.com',
-    pass: process.env.EMAIL_PASS || 'votre_mot_de_passe_app'
-  }
-});
-
-function sendEmailNotification(toEmail, subject, textContent) {
-  if (!toEmail) return;
-  const mailOptions = {
-    from: '"Chat App" <noreply@chatapp.com>',
-    to: toEmail,
-    subject: subject,
-    text: textContent
-  };
-  transporter.sendMail(mailOptions, (err, info) => {
-    if (err) console.error("Erreur envoi email:", err);
-    else console.log("Email envoyé à", toEmail);
-  });
+// Fonction pour envoyer une notification push via ntfy.sh
+function sendNtfyAlert(topic, title, message) {
+  if (!topic) return;
+  fetch(`https://ntfy.sh/${topic}`, {
+    method: 'POST',
+    body: message,
+    headers: {
+      'Title': title,
+      'Priority': 'high',
+      'Tags': 'speech_balloon'
+    }
+  }).catch(err => console.error("Erreur ntfy:", err));
 }
 
 const User = mongoose.model('User', new mongoose.Schema({
   username: { type: String, unique: true, required: true },
   passwordHash: { type: String, required: true },
-  email: { type: String, default: "" } // Champ email optionnel
+  ntfyTopic: { type: String, default: "" } // Canal ntfy personnel de l'utilisateur
 }));
 
 const Message = mongoose.model('Message', new mongoose.Schema({
@@ -55,12 +45,12 @@ const userSockets = {};
 app.get('/ping', (req, res) => res.send('pong'));
 
 io.on('connection', (socket) => {
-  socket.on('register', async ({ username, passwordHash, email }, callback) => {
+  socket.on('register', async ({ username, passwordHash, ntfyTopic }, callback) => {
     try {
       const existing = await User.findOne({ username });
       if (existing) return callback({ success: false, message: "Ce pseudo existe déjà." });
       
-      const newUser = new User({ username, passwordHash, email: email || "" });
+      const newUser = new User({ username, passwordHash, ntfyTopic: ntfyTopic || "" });
       await newUser.save();
       
       socket.data.username = username;
@@ -89,21 +79,21 @@ io.on('connection', (socket) => {
         ]
       }).sort({ timestamp: 1 });
 
-      callback({ success: true, history, email: user.email });
+      callback({ success: true, history, ntfyTopic: user.ntfyTopic });
     } catch (err) {
       callback({ success: false, message: "Erreur lors de la connexion." });
     }
   });
 
-  // Mise à jour de l'email une fois connecté
-  socket.on('update-email', async ({ email }, callback) => {
+  // Mise à jour du canal ntfy une fois connecté
+  socket.on('update-ntfy', async ({ ntfyTopic }, callback) => {
     const username = socket.data.username;
     if (!username) return callback({ success: false, message: "Non authentifié" });
     try {
-      await User.updateOne({ username }, { email });
+      await User.updateOne({ username }, { ntfyTopic });
       callback({ success: true });
     } catch (err) {
-      callback({ success: false, message: "Erreur mise à jour email" });
+      callback({ success: false, message: "Erreur mise à jour ntfy" });
     }
   });
 
@@ -125,11 +115,11 @@ io.on('connection', (socket) => {
       if (recipient === 'patchnote') {
         io.emit('new-message', { sender, recipient: 'patchnote', text, timestamp: newMsg.timestamp });
         
-        // Notifier tous les utilisateurs possédant un email
-        const usersWithEmail = await User.find({ email: { $ne: "" } });
-        usersWithEmail.forEach(u => {
+        // Notifier tous les utilisateurs abonnés à ntfy
+        const usersWithNtfy = await User.find({ ntfyTopic: { $ne: "" } });
+        usersWithNtfy.forEach(u => {
           if (u.username !== sender) {
-            sendEmailNotification(u.email, "📢 Nouveau #patchnote", `${sender} a publié : ${text}`);
+            sendNtfyAlert(u.ntfyTopic, "📢 Nouveau #patchnote", `${sender} a publié : ${text}`);
           }
         });
       } else {
@@ -137,10 +127,10 @@ io.on('connection', (socket) => {
         if (recipientSocketId) {
           io.to(recipientSocketId).emit('new-message', { sender, recipient: sender, text, timestamp: newMsg.timestamp });
         } else {
-          // Destinataire hors ligne -> Envoi d'un mail si disponible
+          // Destinataire hors ligne -> Alerte ntfy
           const recipientUser = await User.findOne({ username: recipient });
-          if (recipientUser && recipientUser.email) {
-            sendEmailNotification(recipientUser.email, `💬 Nouveau message de @${sender}`, `${sender} vous a écrit : "${text}"`);
+          if (recipientUser && recipientUser.ntfyTopic) {
+            sendNtfyAlert(recipientUser.ntfyTopic, `💬 Message de @${sender}`, `${sender} : "${text}"`);
           }
         }
       }
