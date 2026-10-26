@@ -329,7 +329,6 @@
       activeRecipient = recipient;
       if (!chats[recipient]) chats[recipient] = [];
       
-      // Remet à zéro les notifications non lues pour cette conv
       unreadCounts[recipient] = 0;
 
       const isPatchnote = (recipient === 'patchnote');
@@ -387,12 +386,10 @@
       const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       chats[targetKey].push({ sender, text, type: type || 'text', isMe, time });
 
-      // Si le message vient de quelqu'un d'autre et que ce n'est pas la conv active, on incrémente le badge "1" (ou plus)
       if (sender !== currentUser && activeRecipient !== targetKey) {
         unreadCounts[targetKey] = (unreadCounts[targetKey] || 0) + 1;
       }
 
-      // Si c'est un message entrant, on fait remonter la conversation tout en haut
       if (targetKey !== 'patchnote' && sender !== currentUser) {
         const temp = chats[targetKey];
         delete chats[targetKey];
@@ -503,7 +500,6 @@
           bubble.appendChild(authorDiv);
         }
 
-        // Gestion de l'affichage selon le type de message (Texte, Image ou Vocal)
         if (msg.type === 'image') {
           const img = document.createElement('img');
           img.src = msg.text;
@@ -534,7 +530,6 @@
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    // --- ENVOI DE MESSAGE ---
     async function sendMessage(e) {
       e.preventDefault();
       if (!activeRecipient) return;
@@ -554,7 +549,6 @@
       });
     }
 
-    // --- ENVOI DE PHOTO ---
     function handleImageUpload(event) {
       const file = event.target.files[0];
       if (!file || !activeRecipient) return;
@@ -573,7 +567,6 @@
       reader.readAsDataURL(file);
     }
 
-    // --- ENVOI DE VOCAL ---
     async function toggleVoiceRecording() {
       const micIcon = document.getElementById('mic-icon');
       const micBtn = document.getElementById('mic-btn');
@@ -617,9 +610,12 @@
       }
     }
 
-    // --- INDICATEUR DE SAISIE ---
+    // --- INDICATEUR DE SAISIE & ACTIVITÉ LORS DE LA RÉDACTION ---
     function handleTypingInput() {
       if (!activeRecipient || activeRecipient === 'patchnote') return;
+
+      // Taper du texte signifie que l'utilisateur est actif (relance le timer de 5 sec)
+      resetInactivityTimer();
 
       if (!isTyping) {
         isTyping = true;
@@ -633,7 +629,6 @@
       }, 1500);
     }
 
-    // Écouteurs Socket.io globaux
     socket.on('new-message', (data) => {
       const isMe = (data.sender === currentUser);
       if (data.recipient === 'patchnote') {
