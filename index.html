@@ -170,7 +170,7 @@
     const chats = { 'patchnote': [] };
     const unreadCounts = {}; 
     const onlineUsersList = new Set();
-    const userLastSeen = {}; // Stocke la dernière connexion des utilisateurs
+    const userLastSeen = {}; // Stocke les dernières connexions reçues du serveur
 
     let typingTimeout;
     let isTyping = false;
@@ -256,17 +256,18 @@
 
           if (res.history && res.history.length > 0) {
             for (const msg of res.history) {
+              const msgTime = new Date(msg.timestamp || Date.now());
+              const time = msgTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              
               if (msg.recipient === 'patchnote') {
                 const isMe = (msg.sender === currentUser);
-                const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                chats['patchnote'].push({ sender: msg.sender, text: msg.text, type: msg.type || 'text', isMe, time, timestamp: msg.timestamp, read: msg.read });
+                chats['patchnote'].push({ sender: msg.sender, text: msg.text, type: msg.type || 'text', isMe, time, timestamp: msgTime.getTime(), read: msg.read });
               } else {
                 const peer = (msg.sender === currentUser) ? msg.recipient : msg.sender;
                 const isMe = (msg.sender === currentUser);
-                const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 
                 if (!chats[peer]) chats[peer] = [];
-                chats[peer].push({ sender: msg.sender, text: msg.text, type: msg.type || 'text', isMe, time, timestamp: msg.timestamp, read: msg.read });
+                chats[peer].push({ sender: msg.sender, text: msg.text, type: msg.type || 'text', isMe, time, timestamp: msgTime.getTime(), read: msg.read });
               }
             }
           }
@@ -331,10 +332,9 @@
       
       unreadCounts[recipient] = 0;
 
-      // Dès qu'on ouvre la conv, on prévient qu'on a lu les messages de cet utilisateur
+      // Dès qu'on ouvre la conv, on indique au serveur que l'on a lu ces messages
       if (recipient !== 'patchnote') {
         socket.emit('mark-read', { sender: recipient });
-        // Marquer en local comme lus
         chats[recipient].forEach(m => { if (!m.isMe) m.read = true; });
       }
 
@@ -416,7 +416,7 @@
       }
       
       if (activeRecipient === targetKey) renderMessages();
-      renderConversationsList(); // Trie et met à jour l'ordre de la liste des conversations
+      renderConversationsList(); // Réordonne la liste des conversations dynamiquement
     }
 
     function renderConversationsList() {
@@ -448,13 +448,13 @@
         return;
       }
 
-      // TRI AUTOMATIQUE : La conversation avec le message le plus récent passe en haut
+      // TRI AUTOMATIQUE : La conversation avec le message le plus récent (reçu ou envoyé) passe en haut
       peers.sort((a, b) => {
         const msgsA = chats[a];
         const msgsB = chats[b];
         const lastA = msgsA.length > 0 ? (msgsA[msgsA.length - 1].timestamp || 0) : 0;
         const lastB = msgsB.length > 0 ? (msgsB[msgsB.length - 1].timestamp || 0) : 0;
-        return lastB - lastA; // Du plus récent au plus ancien
+        return lastB - lastA;
       });
 
       peers.forEach(peer => {
@@ -546,7 +546,7 @@
           bubble.appendChild(textDiv);
         }
 
-        // Affichage de l'heure et du statut "Vu" pour les messages envoyés par soi-même
+        // Affichage de l'heure et du statut de lecture ("✓ Envoyé" / "✓✓ Vu")
         const footerDiv = document.createElement('div');
         footerDiv.className = `text-[9px] mt-1 flex items-center justify-end space-x-1 ${msg.isMe ? 'text-slate-800' : 'text-slate-500'}`;
         
@@ -680,19 +680,24 @@
       }
     });
 
-    socket.on('presence-update', (usersData) => {
+    // --- MISE À JOUR DE LA PRÉSENCE ET DES DERNIÈRES CONNEXIONS ---
+    socket.on('presence-update', (data) => {
       onlineUsersList.clear();
-      usersData.forEach(u => {
-        onlineUsersList.add(u.username);
-        if (u.lastSeen) {
-          userLastSeen[u.username] = u.lastSeen;
-        }
-      });
+      
+      const activeArray = Array.isArray(data) ? data : (data.onlineUsers || []);
+      const lastSeenMap = data.lastSeenMap || {};
+
+      activeArray.forEach(u => onlineUsersList.add(u));
+      
+      for (const [user, time] of Object.entries(lastSeenMap)) {
+        userLastSeen[user] = time;
+      }
+
       updateActiveChatStatusHeader();
       renderConversationsList();
     });
 
-    // Écouteur pour valider que le destinataire a lu nos messages en direct
+    // --- ÉCOUTEUR POUR L'ACCUSÉ DE LECTURE EN DIRECT ---
     socket.on('messages-read', ({ reader }) => {
       if (chats[reader]) {
         chats[reader].forEach(msg => {
@@ -718,20 +723,36 @@
     });
 
     // --- GESTION DE LA VISIBILITÉ ---
-    document.addEventListener("visibilitychange", () => {
-      if (!socket.connected) return;
-
-      if (document.visibilityState === "visible") {
+    function setAppActive() {
+      if (socket.connected) {
         socket.emit('user-active');
-      } else {
+      }
+    }
+
+    function setAppInactive() {
+      if (socket.connected) {
         socket.emit('user-inactive');
+      }
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        setAppActive();
+      } else {
+        setAppInactive();
       }
     });
 
     window.addEventListener("pagehide", () => {
-      if (socket.connected) {
-        socket.emit('user-inactive');
-      }
+      setAppInactive();
+    });
+
+    window.addEventListener("blur", () => {
+      setAppInactive();
+    });
+
+    window.addEventListener("focus", () => {
+      setAppActive();
     });
   </script>
 </body>
