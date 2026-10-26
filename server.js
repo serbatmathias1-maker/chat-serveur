@@ -1,13 +1,18 @@
 const express = require('express');
-const http = require('http');
+const http = http = require('http'); // ou const http = require('http');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
 
-// Augmentation de la limite de taille pour accepter l'envoi de photos/vocaux en base64
+// Augmentation de la limite de taille pour accepter l'envoi de photos et vocaux en base64 (~100 Mo)
+const io = new Server(server, { 
+  cors: { origin: "*" },
+  maxHttpBufferSize: 1e8 
+});
+
+// Augmentation de la limite JSON d'Express également
 app.use(express.json({ limit: '10mb' }));
 
 const MONGO_URI = "mongodb+srv://adminchat:MonPass1234@chat.5mznug4.mongodb.net/chat?retryWrites=true&w=majority";
@@ -16,6 +21,7 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log("✅ Connecté à MongoDB Atlas !"))
   .catch(err => console.error("❌ Erreur MongoDB:", err));
 
+// Fonction pour envoyer une notification push via ntfy.sh (sans emojis dans les headers)
 function sendNtfyAlert(topic, title, message) {
   if (!topic) return;
   fetch(`https://ntfy.sh/${topic}`, {
