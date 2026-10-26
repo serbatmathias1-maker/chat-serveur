@@ -654,10 +654,12 @@
       }
     });
 
-    // --- GESTION DE LA VISIBILITÉ ET DU SECOND PLAN (PC & Mobile) ---
+    // --- GESTION DE LA VISIBILITÉ ET DU RE-RÉVEIL DU SOCKET (PC & Mobile) ---
     function setAppActive() {
       if (socket.connected) {
         socket.emit('user-active');
+      } else {
+        socket.connect(); // Force la reconnexion si le socket a sauté en arrière-plan
       }
     }
 
@@ -666,6 +668,12 @@
         socket.emit('user-inactive');
       }
     }
+
+    socket.on('connect', () => {
+      if (currentUser) {
+        socket.emit('user-active');
+      }
+    });
 
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") {
@@ -679,6 +687,16 @@
       setAppInactive();
     });
 
+    window.addEventListener("blur", () => {
+      setAppInactive();
+    });
+
+    window.addEventListener("focus", () => {
+      setAppActive();
+    });
+  </script>
+</body>
+</html>
     window.addEventListener("blur", () => {
       setAppInactive();
     });
