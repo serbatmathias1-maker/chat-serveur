@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Messagerie Privée</title>
+  <title>Messagerie Moderne</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -16,57 +16,64 @@
       overflow-wrap: break-word;
     }
 
-    @keyframes fadeInScale {
-      from { opacity: 0; transform: scale(0.97) translateY(4px); }
-      to { opacity: 1; transform: scale(1) translateY(0); }
+    /* Animations fluides et naturelles */
+    @keyframes messagePop {
+      0% { opacity: 0; transform: translateY(10px) scale(0.98); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
     }
     .animate-message {
-      animation: fadeInScale 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      animation: messagePop 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
-    @keyframes slideInRight {
-      from { opacity: 0; transform: translateX(8px); }
-      to { opacity: 1; transform: translateX(0); }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
     }
-    .animate-slide {
-      animation: slideInRight 0.18s ease-out forwards;
+    .animate-fade {
+      animation: fadeIn 0.2s ease-out forwards;
     }
+
+    /* Scrollbar personnalisée très discrète */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
   </style>
 </head>
-<body class="bg-gray-900 text-gray-100 h-dvh flex flex-col font-sans overflow-hidden select-none">
+<body class="bg-[#0b0f19] text-gray-100 h-dvh flex flex-col font-sans overflow-hidden select-none">
 
   <!-- MODAL CONNEXION / INSCRIPTION -->
-  <div id="auth-modal" class="fixed inset-0 bg-gray-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-    <div class="bg-gray-900 p-6 sm:p-8 rounded-2xl border border-gray-800 shadow-xl w-full max-w-sm animate-message">
+  <div id="auth-modal" class="fixed inset-0 bg-[#07090e]/90 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade">
+    <div class="bg-[#111827] p-8 rounded-3xl border border-gray-800/80 shadow-2xl w-full max-w-sm animate-message">
       <div class="text-center mb-6">
-        <div class="w-14 h-14 bg-blue-600/10 text-blue-500 rounded-xl flex items-center justify-center mx-auto mb-3 border border-blue-500/20">
-          <i class="fa-solid fa-comments text-2xl"></i>
+        <div class="w-16 h-16 bg-blue-600/10 text-blue-500 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-blue-500/20 shadow-inner">
+          <i class="fa-solid fa-bolt text-2xl"></i>
         </div>
-        <h2 id="auth-title" class="text-xl font-semibold text-gray-100">Connexion</h2>
-        <p class="text-gray-400 text-xs mt-1">Espace de messagerie sécurisé</p>
+        <h2 id="auth-title" class="text-xl font-bold tracking-tight text-gray-100">Connexion</h2>
+        <p class="text-gray-400 text-xs mt-1">Plateforme de messagerie instantanée</p>
       </div>
 
       <form id="auth-form" onsubmit="handleAuth(event)" class="space-y-4">
         <div>
-          <label class="block text-xs font-medium text-gray-400 mb-1">Pseudo</label>
-          <input type="text" id="auth-username" required class="w-full bg-gray-950 border border-gray-800 rounded-lg px-3.5 py-2.5 text-sm text-gray-100 focus:outline-none focus:border-blue-600 transition-colors">
+          <label class="block text-xs font-semibold text-gray-400 mb-1">Pseudo</label>
+          <input type="text" id="auth-username" required class="w-full bg-[#0b0f19] border border-gray-800 rounded-xl px-4 py-3 text-sm text-gray-100 focus:outline-none focus:border-blue-500 transition-all">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-400 mb-1">Mot de passe</label>
-          <input type="password" id="auth-password" required class="w-full bg-gray-950 border border-gray-800 rounded-lg px-3.5 py-2.5 text-sm text-gray-100 focus:outline-none focus:border-blue-600 transition-colors">
+          <label class="block text-xs font-semibold text-gray-400 mb-1">Mot de passe</label>
+          <input type="password" id="auth-password" required class="w-full bg-[#0b0f19] border border-gray-800 rounded-xl px-4 py-3 text-sm text-gray-100 focus:outline-none focus:border-blue-500 transition-all">
         </div>
 
         <div id="ntfy-field-container" class="hidden">
-          <label class="block text-xs font-medium text-gray-400 mb-1">Canal Ntfy <span class="text-gray-500 lowercase">(optionnel)</span></label>
-          <input type="text" id="auth-ntfy" placeholder="ex: mon-chat-secret-xyz" class="w-full bg-gray-950 border border-gray-800 rounded-lg px-3.5 py-2.5 text-sm text-gray-100 focus:outline-none focus:border-blue-600 transition-colors">
-          <p class="text-[10px] text-gray-500 mt-1">Pour les notifications hors-ligne.</p>
+          <label class="block text-xs font-semibold text-gray-400 mb-1">Canal Ntfy <span class="text-gray-500 lowercase">(optionnel)</span></label>
+          <input type="text" id="auth-ntfy" placeholder="ex: mon-chat-secret-xyz" class="w-full bg-[#0b0f19] border border-gray-800 rounded-xl px-4 py-3 text-sm text-gray-100 focus:outline-none focus:border-blue-500 transition-all">
+          <p class="text-[10px] text-gray-500 mt-1">Pour recevoir vos alertes push hors-ligne.</p>
         </div>
 
-        <button type="submit" id="auth-submit-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-lg shadow-sm transition-all active:scale-[0.99]">
+        <button type="submit" id="auth-submit-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-blue-600/20 transition-all active:scale-[0.98]">
           Se connecter
         </button>
       </form>
 
-      <div class="mt-4 text-center">
+      <div class="mt-5 text-center">
         <button type="button" onclick="toggleAuthMode()" id="auth-toggle-btn" class="text-xs text-gray-400 hover:text-blue-400 transition-colors">
           Pas encore de compte ? S'inscrire
         </button>
@@ -78,98 +85,133 @@
   <!-- INTERFACE PRINCIPALE -->
   <div id="app-interface" class="hidden flex-1 h-full flex overflow-hidden">
     
-    <!-- BARRE LATÉRALE -->
-    <aside id="sidebar" class="w-full md:w-80 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0 h-full transition-all duration-200">
-      <div class="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-900">
+    <!-- BARRE LATÉRALE REVISITÉE -->
+    <aside id="sidebar" class="w-full md:w-80 bg-[#0e1422] border-r border-gray-800/60 flex flex-col shrink-0 h-full transition-all duration-300">
+      
+      <!-- Profil Utilisateur -->
+      <div class="p-4 border-b border-gray-800/60 flex items-center justify-between bg-[#0b0f19]/40">
         <div class="flex items-center space-x-3">
-          <div class="w-9 h-9 bg-blue-600/20 text-blue-400 rounded-full flex items-center justify-center font-semibold text-sm">
+          <div class="w-10 h-10 bg-gradient-to-tr from-blue-600 to-indigo-600 text-white rounded-2xl flex items-center justify-center font-bold text-sm shadow-md">
             <span id="user-avatar">?</span>
           </div>
           <div>
-            <h1 id="user-display" class="font-semibold text-sm text-gray-200">Chargement...</h1>
-            <span class="inline-flex items-center text-[10px] text-emerald-400">
-              <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1.5"></span> En ligne
+            <h1 id="user-display" class="font-bold text-sm text-gray-200 truncate max-w-[120px]">Chargement...</h1>
+            <span class="inline-flex items-center text-[10px] text-emerald-400 font-medium">
+              <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1.5 animate-pulse"></span> En ligne
             </span>
           </div>
         </div>
-        <button onclick="logout()" class="text-gray-400 hover:text-red-400 p-2 transition-colors" title="Se déconnecter">
-          <i class="fa-solid fa-right-from-bracket text-sm"></i>
+        <button onclick="logout()" class="text-gray-400 hover:text-red-400 p-2 rounded-xl hover:bg-gray-800/50 transition-colors" title="Se déconnecter">
+          <i class="fa-solid fa-power-off text-sm"></i>
         </button>
       </div>
 
-      <div class="p-3 border-b border-gray-800 bg-gray-950/40 space-y-2">
-        <div class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Canal d'alerte (Ntfy)</div>
-        <div class="flex items-center space-x-2">
-          <input type="text" id="settings-ntfy" placeholder="Nom de ton canal" class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-xs text-gray-100 focus:outline-none focus:border-blue-600">
-          <button onclick="saveNtfySetting()" class="bg-gray-800 hover:bg-gray-700 text-blue-400 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors" title="Sauvegarder">
-            <i class="fa-solid fa-floppy-disk"></i>
-          </button>
+      <!-- Paramètres Ntfy compacts -->
+      <div class="p-3 border-b border-gray-800/60 bg-[#0b0f19]/20 space-y-2">
+        <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center justify-between">
+          <span>Canal d'alerte Ntfy</span>
+          <a href="https://ntfy.sh" target="_blank" class="text-blue-400 hover:underline"><i class="fa-solid fa-download mr-1"></i>App</a>
         </div>
-        <div class="flex items-center space-x-2 pt-0.5">
-          <a href="https://ntfy.sh" target="_blank" class="flex-1 bg-gray-800/60 hover:bg-gray-800 text-gray-300 border border-gray-700/50 text-center py-1.5 rounded-lg text-[11px] transition-colors">
-            <i class="fa-solid fa-download mr-1"></i> Appli Ntfy
-          </a>
-          <button onclick="openDirectNtfyChannel()" class="flex-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-center py-1.5 rounded-lg text-[11px] transition-colors">
-            <i class="fa-solid fa-bell mr-1"></i> Ouvrir Canal
+        <div class="flex items-center space-x-1.5">
+          <input type="text" id="settings-ntfy" placeholder="Nom du canal..." class="flex-1 bg-[#0b0f19] border border-gray-800 rounded-lg px-3 py-1.5 text-xs text-gray-100 focus:outline-none focus:border-blue-500 transition-all">
+          <button onclick="saveNtfySetting()" class="bg-gray-800 hover:bg-gray-700 text-blue-400 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all" title="Sauvegarder">
+            <i class="fa-solid fa-check"></i>
+          </button>
+          <button onclick="openDirectNtfyChannel()" class="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 px-3 py-1.5 rounded-lg text-xs transition-all" title="Ouvrir Canal">
+            <i class="fa-solid fa-bell"></i>
           </button>
         </div>
       </div>
 
-      <div class="p-3 border-b border-gray-800">
+      <!-- Recherche / Ajout d'ami -->
+      <div class="p-3 border-b border-gray-800/60">
         <form onsubmit="startNewChat(event)" class="flex items-center space-x-2">
-          <input type="text" id="new-chat-input" placeholder="Nouvelle discussion (pseudo)..." required class="flex-1 bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-100 focus:outline-none focus:border-blue-600">
-          <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-medium transition-colors">
+          <div class="relative flex-1">
+            <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-500">
+              <i class="fa-solid fa-magnifying-glass text-xs"></i>
+            </span>
+            <input type="text" id="new-chat-input" placeholder="Nouvelle discussion (@pseudo)..." required class="w-full bg-[#0b0f19] border border-gray-800 rounded-xl pl-8 pr-3 py-2 text-xs text-gray-100 focus:outline-none focus:border-blue-500 transition-all">
+          </div>
+          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-xl text-xs font-semibold transition-all shadow-sm">
             <i class="fa-solid fa-plus"></i>
           </button>
         </form>
       </div>
 
-      <div class="px-3 pt-3 pb-1 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Canaux</div>
-      <div id="channels-list" class="px-2 space-y-0.5"></div>
+      <!-- Liste des Salons / Canaux -->
+      <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-gray-500 uppercase tracking-wider">Annonces</div>
+      <div id="channels-list" class="px-2 space-y-1"></div>
 
-      <div class="px-3 pt-3 pb-1 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Messages Privés</div>
-      <div id="conversations-list" class="flex-1 overflow-y-auto px-2 space-y-0.5 pb-2"></div>
+      <!-- Liste des Messages Privés Modernisée -->
+      <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-gray-500 uppercase tracking-wider flex justify-between items-center">
+        <span>Discussions</span>
+      </div>
+      <div id="conversations-list" class="flex-1 overflow-y-auto px-2 space-y-1 pb-2"></div>
     </aside>
 
     <!-- ZONE DE DISCUSSION -->
-    <main id="chat-window" class="hidden md:flex flex-1 flex-col h-full bg-gray-950 animate-slide">
-      <header id="chat-header" class="bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center justify-between shrink-0">
+    <main id="chat-window" class="hidden md:flex flex-1 flex-col h-full bg-[#07090e] animate-slide">
+      
+      <!-- En-tête du Chat -->
+      <header id="chat-header" class="bg-[#0e1422]/80 backdrop-blur-md border-b border-gray-800/60 px-4 py-3 flex items-center justify-between shrink-0 z-10">
         <div class="flex items-center space-x-3">
-          <button onclick="showSidebarOnMobile()" class="md:hidden text-gray-400 hover:text-gray-200 p-1 mr-1">
+          <button onclick="showSidebarOnMobile()" class="md:hidden text-gray-400 hover:text-gray-200 p-1.5 rounded-lg hover:bg-gray-800/50 transition-colors">
             <i class="fa-solid fa-arrow-left text-base"></i>
           </button>
-          <div class="w-8 h-8 bg-gray-800 text-blue-400 rounded-full flex items-center justify-center font-semibold text-xs">
+          <div class="w-9 h-9 bg-gray-800 text-blue-400 rounded-xl flex items-center justify-center font-bold text-xs shadow-inner">
             <span id="active-chat-avatar">@</span>
           </div>
           <div>
-            <h2 id="active-chat-name" class="font-semibold text-xs text-gray-200">Sélectionnez une discussion</h2>
+            <h2 id="active-chat-name" class="font-bold text-xs text-gray-200">Sélectionnez une discussion</h2>
             <p id="active-chat-status" class="text-[10px] text-gray-400">Hors ligne</p>
           </div>
         </div>
       </header>
 
+      <!-- Boîte d'affichage des messages -->
       <div id="chat-box" class="flex-1 overflow-y-auto p-4 space-y-3">
         <div id="no-chat-selected" class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2 animate-message">
-          <i class="fa-regular fa-comments text-3xl text-gray-600"></i>
-          <p class="text-xs">Sélectionnez une conversation pour commencer</p>
+          <div class="w-16 h-16 rounded-2xl bg-gray-900 flex items-center justify-center text-gray-600 border border-gray-800 mb-2">
+            <i class="fa-regular fa-comments text-2xl"></i>
+          </div>
+          <p class="text-xs font-medium">Sélectionnez un contact pour commencer à discuter</p>
         </div>
       </div>
 
-      <!-- Footer d'envoi -->
-      <footer id="chat-footer" class="bg-gray-900 border-t border-gray-800 p-3 shrink-0 hidden">
+      <!-- Prévisualisation des médias avant envoi (si activée) -->
+      <div id="media-preview-container" class="hidden bg-[#0e1422] border-t border-gray-800 p-3 flex items-center justify-between px-6">
+        <div class="flex items-center space-x-3">
+          <div id="preview-thumbnail-wrap" class="w-12 h-12 rounded-xl bg-gray-800 overflow-hidden flex items-center justify-center border border-gray-700">
+            <img id="preview-img-tag" class="w-full h-full object-cover hidden" />
+            <i id="preview-icon-tag" class="fa-solid fa-microphone text-blue-400 text-lg"></i>
+          </div>
+          <div>
+            <p id="preview-title" class="text-xs font-bold text-gray-200">Fichier prêt à l'envoi</p>
+            <p class="text-[10px] text-gray-400">Vérifiez avant d'envoyer</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="cancelMediaPreview()" class="px-3 py-1.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold transition-all">Annuler</button>
+          <button onclick="confirmSendMedia()" class="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-all shadow-md">Envoyer</button>
+        </div>
+      </div>
+
+      <!-- Footer d'envoi moderne -->
+      <footer id="chat-footer" class="bg-[#0e1422] border-t border-gray-800/60 p-3 shrink-0 hidden">
         <form id="chat-form" onsubmit="sendMessage(event)" class="flex items-center space-x-2">
-          <input type="file" id="image-input" accept="image/*" class="hidden" onchange="handleImageUpload(event)">
-          <button type="button" onclick="document.getElementById('image-input').click()" class="text-gray-400 hover:text-blue-400 p-2 transition-colors" title="Envoyer une photo">
+          
+          <input type="file" id="image-input" accept="image/*" class="hidden" onchange="prepareImagePreview(event)">
+          <button type="button" onclick="document.getElementById('image-input').click()" class="text-gray-400 hover:text-blue-400 p-2.5 rounded-xl hover:bg-gray-800/50 transition-colors" title="Envoyer une photo">
             <i class="fa-solid fa-image text-base"></i>
           </button>
 
-          <button type="button" id="mic-btn" onclick="toggleVoiceRecording()" class="text-gray-400 hover:text-red-400 p-2 transition-colors" title="Enregistrer un vocal">
+          <button type="button" id="mic-btn" onclick="toggleVoiceRecording()" class="text-gray-400 hover:text-red-400 p-2.5 rounded-xl hover:bg-gray-800/50 transition-colors" title="Enregistrer un vocal">
             <i class="fa-solid fa-microphone text-base" id="mic-icon"></i>
           </button>
 
-          <input type="text" id="message-input" placeholder="Écrivez votre message..." autocomplete="off" oninput="handleTypingInput()" class="flex-1 bg-gray-950 border border-gray-800 rounded-lg px-3.5 py-2 text-xs text-gray-100 focus:outline-none focus:border-blue-600 transition-colors">
+          <input type="text" id="message-input" placeholder="Tapez votre message..." autocomplete="off" oninput="handleTypingInput()" class="flex-1 bg-[#0b0f19] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-gray-100 focus:outline-none focus:border-blue-500 transition-all">
           
-          <button type="submit" id="send-btn" class="bg-blue-600 hover:bg-blue-700 text-white p-2.5 rounded-lg font-medium flex items-center justify-center transition-all shadow-sm">
+          <button type="submit" id="send-btn" class="bg-blue-600 hover:bg-blue-500 text-white p-2.5 rounded-xl font-bold flex items-center justify-center transition-all shadow-md shadow-blue-600/20 active:scale-95">
             <i class="fa-solid fa-paper-plane text-xs"></i>
           </button>
         </form>
@@ -196,6 +238,10 @@
     let mediaRecorder;
     let audioChunks = [];
     let isRecording = false;
+
+    // Stockage temporaire pour la prévisualisation avant envoi
+    let pendingMediaData = null;
+    let pendingMediaType = null;
 
     async function hashPassword(password) {
       const enc = new TextEncoder();
@@ -333,7 +379,7 @@
     function startNewChat(e) {
       e.preventDefault();
       const input = document.getElementById('new-chat-input');
-      const targetUser = input.value.trim();
+      const targetUser = input.value.trim().replace(/^@/, '');
       
       if (!targetUser || targetUser === currentUser) return;
 
@@ -389,8 +435,8 @@
       }
 
       if (onlineUsersList.has(activeRecipient)) {
-        statusEl.innerHTML = `<span class="inline-block w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1.5"></span> En ligne`;
-        statusEl.className = "text-[10px] text-emerald-400 font-medium";
+        statusEl.innerHTML = `<span class="inline-block w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1.5 animate-pulse"></span> En ligne`;
+        statusEl.className = "text-[10px] text-emerald-400 font-semibold";
       } else {
         const lastSeenTime = userLastSeen[activeRecipient];
         if (lastSeenTime) {
@@ -460,13 +506,13 @@
       wrapper.className = `flex flex-col ${msg.isMe ? 'items-end' : 'items-start'} animate-message`;
 
       const bubble = document.createElement('div');
-      bubble.className = `max-w-[75%] rounded-xl px-3.5 py-2 text-xs shadow-sm break-words-custom ${
-        msg.isMe ? 'bg-blue-600 text-white rounded-br-xs' : 'bg-gray-800 border border-gray-700/50 text-gray-100 rounded-bl-xs'
+      bubble.className = `max-w-[78%] rounded-2xl px-4 py-2.5 text-xs shadow-md break-words-custom ${
+        msg.isMe ? 'bg-blue-600 text-white rounded-br-xs font-medium' : 'bg-[#111827] border border-gray-800 text-gray-100 rounded-bl-xs'
       }`;
 
       if (activeRecipient === 'patchnote' && !msg.isMe) {
         const authorDiv = document.createElement('div');
-        authorDiv.className = 'text-[10px] font-semibold text-blue-400 mb-0.5';
+        authorDiv.className = 'text-[10px] font-bold text-blue-400 mb-1';
         authorDiv.innerText = msg.sender;
         bubble.appendChild(authorDiv);
       }
@@ -474,7 +520,7 @@
       if (msg.type === 'image') {
         const img = document.createElement('img');
         img.src = msg.text;
-        img.className = 'rounded-lg max-h-48 object-cover cursor-pointer my-1';
+        img.className = 'rounded-xl max-h-52 object-cover cursor-pointer my-1 hover:opacity-95 transition-opacity';
         img.onclick = () => window.open(msg.text);
         bubble.appendChild(img);
       } else if (msg.type === 'audio') {
@@ -490,7 +536,7 @@
       }
 
       const footerDiv = document.createElement('div');
-      footerDiv.className = `text-[9px] mt-1 flex items-center justify-end space-x-1.5 ${msg.isMe ? 'text-blue-200' : 'text-gray-400'}`;
+      footerDiv.className = `text-[9px] mt-1.5 flex items-center justify-end space-x-1.5 ${msg.isMe ? 'text-blue-200' : 'text-gray-400'}`;
       
       const timeSpan = document.createElement('span');
       timeSpan.innerText = msg.time;
@@ -498,7 +544,7 @@
 
       if (msg.isMe && activeRecipient !== 'patchnote') {
         const readSpan = document.createElement('span');
-        readSpan.className = "font-medium";
+        readSpan.className = "font-semibold";
         if (msg.read) {
           readSpan.innerText = "✓✓ Vu";
           readSpan.className += " text-white";
@@ -544,13 +590,13 @@
       const isPatchnoteActive = (activeRecipient === 'patchnote');
       const patchnoteBtn = document.createElement('button');
       patchnoteBtn.onclick = () => selectChat('patchnote');
-      patchnoteBtn.className = `w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${
-        isPatchnoteActive ? 'bg-gray-800 text-gray-100 font-medium' : 'hover:bg-gray-800/40 text-gray-400'
+      patchnoteBtn.className = `w-full flex items-center space-x-3 p-2.5 rounded-xl text-left transition-all ${
+        isPatchnoteActive ? 'bg-blue-600/15 border border-blue-500/30 text-blue-400 font-semibold' : 'hover:bg-gray-800/40 text-gray-400'
       }`;
       patchnoteBtn.innerHTML = `
-        <div class="w-7 h-7 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center font-semibold text-xs shrink-0">#</div>
+        <div class="w-8 h-8 rounded-xl bg-blue-600/20 text-blue-400 flex items-center justify-center font-bold text-xs shrink-0">#</div>
         <div class="flex-1 overflow-hidden">
-          <div class="text-xs font-medium truncate text-gray-200">patchnote</div>
+          <div class="text-xs font-bold truncate text-gray-200">patchnote</div>
           <div class="text-[10px] text-gray-500 truncate">Mises à jour officielles</div>
         </div>
       `;
@@ -590,24 +636,77 @@
 
         const btn = document.createElement('button');
         btn.onclick = () => selectChat(peer);
-        btn.className = `w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${
-          isActive ? 'bg-gray-800 text-gray-100 font-medium' : 'hover:bg-gray-800/40 text-gray-400'
+        btn.className = `w-full flex items-center space-x-3 p-2.5 rounded-xl text-left transition-all ${
+          isActive ? 'bg-blue-600/15 border border-blue-500/30 text-blue-400 font-semibold' : 'hover:bg-gray-800/40 text-gray-400'
         }`;
 
         btn.innerHTML = `
           <div class="relative shrink-0">
-            <div class="w-7 h-7 rounded-lg ${isActive ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'} flex items-center justify-center font-semibold text-xs">
+            <div class="w-8 h-8 rounded-xl ${isActive ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'} flex items-center justify-center font-bold text-xs shadow-sm">
               ${peer[0].toUpperCase()}
             </div>
-            ${isOnline ? '<span class="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-emerald-500 border border-gray-900 rounded-full"></span>' : ''}
+            ${isOnline ? '<span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#0e1422] rounded-full animate-pulse"></span>' : ''}
           </div>
           <div class="flex-1 overflow-hidden">
-            <div class="text-xs font-medium truncate text-gray-200">@${peer}</div>
+            <div class="text-xs font-bold truncate text-gray-200">@${peer}</div>
             <div class="text-[10px] text-gray-500 truncate">${lastMsgText}</div>
           </div>
-          ${unread > 0 ? `<div class="bg-blue-600 text-white font-semibold text-[9px] px-1.5 py-0.5 rounded-full shrink-0">${unread}</div>` : ''}
+          ${unread > 0 ? `<div class="bg-blue-600 text-white font-bold text-[9px] w-5 h-5 rounded-full flex items-center justify-center shrink-0 shadow-sm">${unread}</div>` : ''}
         `;
         listEl.appendChild(btn);
+      });
+    }
+
+    // --- PRÉVISUALISATION DES MÉDIAS AVANT ENVOI ---
+    function prepareImagePreview(event) {
+      const file = event.target.files[0];
+      if (!file || !activeRecipient) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        pendingMediaData = e.target.result;
+        pendingMediaType = 'image';
+
+        document.getElementById('preview-img-tag').src = pendingMediaData;
+        document.getElementById('preview-img-tag').classList.remove('hidden');
+        document.getElementById('preview-icon-tag').classList.add('hidden');
+        document.getElementById('preview-title').innerText = "Photo sélectionnée";
+        document.getElementById('media-preview-container').classList.remove('hidden');
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function prepareAudioPreview(base64Audio) {
+      pendingMediaData = base64Audio;
+      pendingMediaType = 'audio';
+
+      document.getElementById('preview-img-tag').classList.add('hidden');
+      document.getElementById('preview-icon-tag').classList.remove('hidden');
+      document.getElementById('preview-title').innerText = "Message vocal enregistré";
+      document.getElementById('media-preview-container').classList.remove('hidden');
+    }
+
+    function cancelMediaPreview() {
+      pendingMediaData = null;
+      pendingMediaType = null;
+      document.getElementById('media-preview-container').classList.add('hidden');
+      document.getElementById('image-input').value = "";
+    }
+
+    function confirmSendMedia() {
+      if (!pendingMediaData || !pendingMediaType || !activeRecipient) return;
+
+      const dataToSend = pendingMediaData;
+      const typeToSend = pendingMediaType;
+
+      cancelMediaPreview();
+
+      storeMessage(activeRecipient, currentUser, dataToSend, typeToSend, true, Date.now(), false);
+
+      socket.emit('send-message', { recipient: activeRecipient, text: dataToSend, type: typeToSend }, (res) => {
+        if (!res || !res.success) {
+          alert("Erreur lors de l'envoi du fichier.");
+        }
       });
     }
 
@@ -630,24 +729,7 @@
       });
     }
 
-    function handleImageUpload(event) {
-      const file = event.target.files[0];
-      if (!file || !activeRecipient) return;
-
-      const reader = new FileReader();
-      reader.onload = function(uploadEvent) {
-        const base64Image = uploadEvent.target.result;
-        storeMessage(activeRecipient, currentUser, base64Image, 'image', true, Date.now(), false);
-
-        socket.emit('send-message', { recipient: activeRecipient, text: base64Image, type: 'image' }, (res) => {
-          if (!res || !res.success) {
-            alert("Erreur lors de l'envoi de l'image.");
-          }
-        });
-      };
-      reader.readAsDataURL(file);
-    }
-
+    // Gestion de l'enregistrement vocal avec la prévisualisation
     async function toggleVoiceRecording() {
       const micIcon = document.getElementById('mic-icon');
       const micBtn = document.getElementById('mic-btn');
@@ -667,21 +749,14 @@
             const reader = new FileReader();
             reader.readAsDataURL(audioBlob);
             reader.onloadend = function() {
-              const base64Audio = reader.result;
-              storeMessage(activeRecipient, currentUser, base64Audio, 'audio', true, Date.now(), false);
-
-              socket.emit('send-message', { recipient: activeRecipient, text: base64Audio, type: 'audio' }, (res) => {
-                if (!res || !res.success) {
-                  alert("Erreur d'envoi du vocal.");
-                }
-              });
+              prepareAudioPreview(reader.result);
             };
           };
 
           mediaRecorder.start();
           isRecording = true;
-          micIcon.className = "fa-solid fa-stop text-base text-red-500 animate-pulse";
-          micBtn.title = "Arrêter et envoyer";
+          micIcon.className = "fa-solid fa-stop text-base text-red-500 animate-bounce";
+          micBtn.title = "Arrêter l'enregistrement";
         } catch (err) {
           alert("Impossible d'accéder au microphone.");
         }
