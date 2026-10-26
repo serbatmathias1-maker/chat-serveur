@@ -11,6 +11,12 @@
     body { touch-action: manipulation; }
     .h-dvh { height: 100dvh; }
 
+    /* Gestion propre du retour à la ligne pour les longs messages */
+    .break-words-custom {
+      word-break: break-word;
+      overflow-wrap: break-word;
+    }
+
     /* Petites animations fluides personnalisées */
     @keyframes fadeInScale {
       from { opacity: 0; transform: scale(0.95) translateY(6px); }
@@ -531,7 +537,8 @@
         wrapper.className = `flex flex-col ${msg.isMe ? 'items-end' : 'items-start'} animate-message`;
 
         const bubble = document.createElement('div');
-        bubble.className = `max-w-[80%] rounded-2xl px-4 py-2 text-xs shadow-md transition-all ${
+        // Ajout de max-w-[80%] et break-words-custom pour forcer le retour à la ligne
+        bubble.className = `max-w-[80%] rounded-2xl px-4 py-2 text-xs shadow-md transition-all break-words-custom ${
           msg.isMe ? 'bg-emerald-500 text-slate-950 rounded-br-none font-medium' : 'bg-slate-900 border border-slate-800 text-slate-100 rounded-bl-none'
         }`;
 
@@ -723,7 +730,7 @@
     socket.on('user-typing', ({ sender }) => {
       if (activeRecipient === sender) {
         document.getElementById('active-chat-status').innerText = "En train d'écrire...";
-        document.getElementById('active-chat-status5').className = "text-[10px] text-emerald-400 italic animate-pulse";
+        document.getElementById('active-chat-status').className = "text-[10px] text-emerald-400 italic animate-pulse";
       }
     });
 
