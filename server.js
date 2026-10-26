@@ -45,8 +45,8 @@ const User = mongoose.model('User', new mongoose.Schema({
 const Message = mongoose.model('Message', new mongoose.Schema({
   sender: { type: String, required: true },
   recipient: { type: String, required: true },
-  text: { type: String, required: true }, // Contient le texte, ou l'URL/Base64 de l'image/vocal
-  type: { type: String, default: 'text' }, // 'text', 'image', ou 'audio'
+  text: { type: String, required: true },
+  type: { type: String, default: 'text' },
   timestamp: { type: Date, default: Date.now },
   read: { type: Boolean, default: false }
 }));
@@ -54,15 +54,18 @@ const Message = mongoose.model('Message', new mongoose.Schema({
 const userSockets = {};
 const onlineUsers = new Set();
 
-// Fonction utilitaire pour diffuser la liste des utilisateurs connectés avec leur lastSeen
-async function broadcastOnlineUsers() {
+// Fonction corrigée : envoie la liste des pseudos en ligne + un dictionnaire des lastSeen de tout le monde
+async function broadcastPresence() {
   const usersFromDb = await User.find({}, 'username lastSeen');
-  const usersData = usersFromDb.map(u => ({
-    username: u.username,
-    isOnline: onlineUsers.has(u.username),
-    lastSeen: u.lastSeen
-  }));
-  io.emit('presence-update', usersData);
+  const lastSeenMap = {};
+  usersFromDb.forEach(u => {
+    lastSeenMap[u.username] = u.lastSeen;
+  });
+
+  io.emit('presence-update', {
+    onlineUsers: Array.from(onlineUsers),
+    lastSeenMap: lastSeenMap
+  });
 }
 
 app.get('/ping', (req, res) => res.send('pong'));
@@ -81,7 +84,7 @@ io.on('connection', (socket) => {
       onlineUsers.add(username);
       
       await User.updateOne({ username }, { lastSeen: Date.now() });
-      broadcastOnlineUsers();
+      broadcastPresence();
 
       callback({ success: true });
     } catch (err) {
@@ -102,7 +105,7 @@ io.on('connection', (socket) => {
 
       user.lastSeen = Date.now();
       await user.save();
-      broadcastOnlineUsers();
+      broadcastPresence();
 
       const history = await Message.find({
         $or: [
@@ -118,7 +121,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Gestion de l'inactivité / présence
   socket.on('user-active', async () => {
     const username = socket.data.username;
     if (username) {
@@ -126,7 +128,7 @@ io.on('connection', (socket) => {
       if (!onlineUsers.has(username)) {
         onlineUsers.add(username);
         await User.updateOne({ username }, { lastSeen: Date.now() });
-        broadcastOnlineUsers();
+        broadcastPresence();
       }
     }
   });
@@ -138,11 +140,10 @@ io.on('connection', (socket) => {
       onlineUsers.delete(username);
       const now = Date.now();
       await User.updateOne({ username }, { lastSeen: now });
-      broadcastOnlineUsers();
+      broadcastPresence();
     }
   });
 
-  // Indicateur de saisie ("En train d'écrire...")
   socket.on('typing', ({ recipient }) => {
     const sender = socket.data.username;
     const recipientSocketId = userSockets[recipient];
@@ -170,18 +171,15 @@ io.on('connection', (socket) => {
     }
   });
 
-  // --- ACCUSÉ DE LECTURE ("VU") ---
   socket.on('mark-read', async ({ sender }) => {
     const username = socket.data.username;
     if (!username) return;
     try {
-      // Marque comme lus les messages reçus de cet expéditeur
       await Message.updateMany(
         { sender: sender, recipient: username, read: false },
         { $set: { read: true } }
       );
 
-      // Si l'expéditeur est en ligne, on l'informe en direct
       const senderSocketId = userSockets[sender];
       if (senderSocketId) {
         io.to(senderSocketId).emit('messages-read', { reader: username });
@@ -217,7 +215,6 @@ io.on('connection', (socket) => {
         read: false 
       };
 
-      // Renvoie le timestamp pour l'affichage dynamique côté client
       callback({ success: true, timestamp: newMsg.timestamp });
 
       if (recipient === 'patchnote') {
@@ -253,7 +250,7 @@ io.on('connection', (socket) => {
       onlineUsers.delete(username);
       const now = Date.now();
       await User.updateOne({ username }, { lastSeen: now });
-      broadcastOnlineUsers();
+      broadcastPresence();
     }
   });
 });
