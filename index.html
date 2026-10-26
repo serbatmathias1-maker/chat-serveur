@@ -11,13 +11,11 @@
     body { touch-action: manipulation; }
     .h-dvh { height: 100dvh; }
 
-    /* Gestion propre du retour à la ligne pour les longs messages */
     .break-words-custom {
       word-break: break-word;
       overflow-wrap: break-word;
     }
 
-    /* Petites animations fluides personnalisées */
     @keyframes fadeInScale {
       from { opacity: 0; transform: scale(0.95) translateY(6px); }
       to { opacity: 1; transform: scale(1) translateY(0); }
@@ -280,14 +278,12 @@
             for (const msg of res.history) {
               const msgTime = new Date(msg.timestamp || Date.now());
               const time = msgTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              const isMe = (msg.sender === currentUser);
               
               if (msg.recipient === 'patchnote') {
-                const isMe = (msg.sender === currentUser);
                 chats['patchnote'].push({ sender: msg.sender, text: msg.text, type: msg.type || 'text', isMe, time, timestamp: msgTime.getTime(), read: msg.read });
               } else {
-                const peer = (msg.sender === currentUser) ? msg.recipient : msg.sender;
-                const isMe = (msg.sender === currentUser);
-                
+                const peer = isMe ? msg.recipient : msg.sender;
                 if (!chats[peer]) chats[peer] = [];
                 chats[peer].push({ sender: msg.sender, text: msg.text, type: msg.type || 'text', isMe, time, timestamp: msgTime.getTime(), read: msg.read });
               }
@@ -417,18 +413,29 @@
       document.getElementById('chat-window').classList.remove('flex');
     }
 
-    function storeMessage(targetKey, sender, text, type, isMe, timestamp, read) {
+    // Gestion centralisée et propre pour stocker et afficher un message sans doublon ni saut d'écran
+    function storeMessage(targetKey, sender, text, type, isMe, timestamp, read, skipDOM = false) {
       if (!chats[targetKey]) chats[targetKey] = [];
       const msgTime = timestamp ? new Date(timestamp) : new Date();
       const time = msgTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      
+      const timeMs = msgTime.getTime();
+
+      // Évite les doublons stricts si le message vient d'arriver par socket alors qu'on l'avait déjà créé en local
+      const isDuplicate = chats[targetKey].some(m => 
+        m.sender === sender && 
+        m.text === text && 
+        Math.abs(m.timestamp - timeMs) < 3000
+      );
+
+      if (isDuplicate) return;
+
       const messageObj = { 
         sender, 
         text, 
         type: type || 'text', 
         isMe, 
         time, 
-        timestamp: msgTime.getTime(), 
+        timestamp: timeMs, 
         read: read !== undefined ? read : (isMe ? false : (activeRecipient === targetKey)) 
       };
 
@@ -438,19 +445,16 @@
         unreadCounts[targetKey] = (unreadCounts[targetKey] || 0) + 1;
       }
       
-      // Si on est dans la conv active, on ajoute proprement le message avec l'animation sans tout recharger
-      if (activeRecipient === targetKey) {
+      if (activeRecipient === targetKey && !skipDOM) {
         appendMessageDOM(messageObj);
       }
 
       renderConversationsList();
     }
 
-    // Fonction dédiée pour ajouter un seul message dans le DOM avec l'animation
     function appendMessageDOM(msg) {
       const chatBox = document.getElementById('chat-box');
       
-      // Supprime le message "C'est le début de cette discussion" si présent
       const emptyState = document.getElementById('no-chat-selected');
       if (emptyState && chatBox.contains(emptyState)) {
         chatBox.innerHTML = "";
@@ -533,7 +537,6 @@
         return;
       }
 
-      // Quand on charge toute la conv (ex: en changeant de salon), on affiche tout d'un coup sans recréer le bug
       msgs.forEach(msg => {
         appendMessageDOM(msg);
       });
@@ -621,13 +624,14 @@
       const text = messageInput.value.trim();
       if (!text) return;
 
+      // Affichage immédiat en local avec animation (skipDOM false) pour éviter toute latence
+      storeMessage(activeRecipient, currentUser, text, 'text', true, Date.now(), false);
+      messageInput.value = "";
+      socket.emit('stop-typing', { recipient: activeRecipient });
+
       socket.emit('send-message', { recipient: activeRecipient, text, type: 'text' }, (res) => {
-        if (res && res.success) {
-          storeMessage(activeRecipient, currentUser, text, 'text', true, res.timestamp, false);
-          messageInput.value = "";
-          socket.emit('stop-typing', { recipient: activeRecipient });
-        } else {
-          alert(res ? res.message : "Erreur d'envoi du message.");
+        if (!res || !res.success) {
+          alert("Erreur d'envoi du message.");
         }
       });
     }
@@ -639,10 +643,10 @@
       const reader = new FileReader();
       reader.onload = function(uploadEvent) {
         const base64Image = uploadEvent.target.result;
+        storeMessage(activeRecipient, currentUser, base64Image, 'image', true, Date.now(), false);
+
         socket.emit('send-message', { recipient: activeRecipient, text: base64Image, type: 'image' }, (res) => {
-          if (res && res.success) {
-            storeMessage(activeRecipient, currentUser, base64Image, 'image', true, res.timestamp, false);
-          } else {
+          if (!res || !res.success) {
             alert("Erreur lors de l'envoi de l'image.");
           }
         });
@@ -670,9 +674,11 @@
             reader.readAsDataURL(audioBlob);
             reader.onloadend = function() {
               const base64Audio = reader.result;
+              storeMessage(activeRecipient, currentUser, base64Audio, 'audio', true, Date.now(), false);
+
               socket.emit('send-message', { recipient: activeRecipient, text: base64Audio, type: 'audio' }, (res) => {
-                if (res && res.success) {
-                  storeMessage(activeRecipient, currentUser, base64Audio, 'audio', true, res.timestamp, false);
+                if (!res || !res.success) {
+                  alert("Erreur d'envoi du vocal.");
                 }
               });
             };
@@ -710,6 +716,7 @@
 
     socket.on('new-message', (data) => {
       const isMe = (data.sender === currentUser);
+      // Si c'est nous qui l'avons envoyé, storeMessage gère déjà le filtre anti-doublon
       if (data.recipient === 'patchnote') {
         storeMessage('patchnote', data.sender, data.text, data.type, isMe, data.timestamp, data.read);
       } else {
