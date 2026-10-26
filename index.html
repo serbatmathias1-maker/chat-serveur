@@ -654,17 +654,37 @@
       }
     });
 
-    // --- GESTION DE LA VISIBILITÉ (Premier plan / Second plan) ---
-    document.addEventListener("visibilitychange", () => {
-      if (!socket.connected) return;
-
-      if (document.visibilityState === "visible") {
-        // L'utilisateur revient sur l'application (Premier plan) -> En ligne
+    // --- GESTION DE LA VISIBILITÉ ET DU SECOND PLAN (PC & Mobile) ---
+    function setAppActive() {
+      if (socket.connected) {
         socket.emit('user-active');
-      } else {
-        // L'utilisateur quitte l'onglet ou l'application mobile (Second plan) -> Hors ligne pour ntfy
+      }
+    }
+
+    function setAppInactive() {
+      if (socket.connected) {
         socket.emit('user-inactive');
       }
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        setAppActive();
+      } else {
+        setAppInactive();
+      }
+    });
+
+    window.addEventListener("pagehide", () => {
+      setAppInactive();
+    });
+
+    window.addEventListener("blur", () => {
+      setAppInactive();
+    });
+
+    window.addEventListener("focus", () => {
+      setAppActive();
     });
   </script>
 </body>
