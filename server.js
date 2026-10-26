@@ -2,51 +2,59 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
-const cors = require('cors');
 
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: '10mb' })); // Pour supporter les images/vocaux en base64
-
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
+
+// Augmentation de la limite de taille pour accepter l'envoi de photos et vocaux en base64 (~100 Mo)
+const io = new Server(server, { 
+  cors: { origin: "*" },
+  maxHttpBufferSize: 1e8 
 });
 
-// Connexion MongoDB Atlas (remplace par ton URI si besoin)
-const MONGO_URI = process.env.MONGO_URI || "TON_URI_MONGODB_ICI";
+// Augmentation de la limite JSON d'Express également
+app.use(express.json({ limit: '10mb' }));
+
+const MONGO_URI = "mongodb+srv://adminchat:MonPass1234@chat.5mznug4.mongodb.net/chat?retryWrites=true&w=majority";
 
 mongoose.connect(MONGO_URI)
-  .then(() => console.log("Connecté à MongoDB Atlas"))
-  .catch(err => console.error("Erreur de connexion MongoDB :", err));
+  .then(() => console.log("✅ Connecté à MongoDB Atlas !"))
+  .catch(err => console.error("❌ Erreur MongoDB:", err));
 
-// --- SCHÉMAS DE LA BASE DE DONNÉES ---
-const userSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true },
+// Fonction pour envoyer une notification push via ntfy.sh (sans emojis dans les headers)
+function sendNtfyAlert(topic, title, message) {
+  if (!topic) return;
+  fetch(`https://ntfy.sh/${topic}`, {
+    method: 'POST',
+    body: message,
+    headers: {
+      'Title': title,
+      'Priority': 'high',
+      'Click': 'https://serbatmathias1-maker.github.io/chat-serveur/'
+    }
+  }).catch(err => console.error("Erreur ntfy:", err));
+}
+
+const User = mongoose.model('User', new mongoose.Schema({
+  username: { type: String, unique: true, required: true },
   passwordHash: { type: String, required: true },
   ntfyTopic: { type: String, default: "" },
   lastSeen: { type: Date, default: Date.now }
-});
+}));
 
-const messageSchema = new mongoose.Schema({
+const Message = mongoose.model('Message', new mongoose.Schema({
   sender: { type: String, required: true },
   recipient: { type: String, required: true },
-  text: { type: String, required: true },
-  type: { type: String, default: 'text' }, // 'text', 'image', 'audio'
-  timestamp: { type: Number, default: Date.now },
+  text: { type: String, required: true }, // Contient le texte, ou l'URL/Base64 de l'image/vocal
+  type: { type: String, default: 'text' }, // 'text', 'image', ou 'audio'
+  timestamp: { type: Date, default: Date.now },
   read: { type: Boolean, default: false }
-});
+}));
 
-const User = mongoose.model('User', userSchema);
-const Message = mongoose.model('Message', messageSchema);
+const userSockets = {};
+const onlineUsers = new Set();
 
-// Stockage en mémoire des utilisateurs connectés (username -> socketId)
-const onlineUsers = new Map();
-
-// Fonction utilitaire pour diffuser la liste des utilisateurs en ligne avec leur lastSeen
+// Fonction utilitaire pour diffuser la liste des utilisateurs connectés avec leur lastSeen
 async function broadcastOnlineUsers() {
   const usersFromDb = await User.find({}, 'username lastSeen');
   const usersData = usersFromDb.map(u => ({
@@ -57,41 +65,45 @@ async function broadcastOnlineUsers() {
   io.emit('presence-update', usersData);
 }
 
-io.on('connection', (socket) => {
-  console.log(`Nouvelle connexion socket : ${socket.id}`);
+app.get('/ping', (req, res) => res.send('pong'));
 
-  // --- INSCRIPTION ---
+io.on('connection', (socket) => {
   socket.on('register', async ({ username, passwordHash, ntfyTopic }, callback) => {
     try {
-      const existingUser = await User.findOne({ username });
-      if (existingUser) {
-        return callback({ success: false, message: "Ce pseudo est déjà pris." });
-      }
-
-      const newUser = new User({ username, passwordHash, ntfyTopic, lastSeen: Date.now() });
+      const existing = await User.findOne({ username });
+      if (existing) return callback({ success: false, message: "Ce pseudo existe déjà." });
+      
+      const newUser = new User({ username, passwordHash, ntfyTopic: ntfyTopic || "", lastSeen: Date.now() });
       await newUser.save();
+      
+      socket.data.username = username;
+      userSockets[username] = socket.id;
+      onlineUsers.add(username);
+      
+      await User.updateOne({ username }, { lastSeen: Date.now() });
+      broadcastOnlineUsers();
+
       callback({ success: true });
     } catch (err) {
-      callback({ success: false, message: "Erreur serveur lors de l'inscription." });
+      callback({ success: false, message: "Erreur lors de l'inscription." });
     }
   });
 
-  // --- CONNEXION ---
   socket.on('login', async ({ username, passwordHash }, callback) => {
     try {
       const user = await User.findOne({ username });
       if (!user || user.passwordHash !== passwordHash) {
-        return callback({ success: false, message: "Pseudo ou mot de passe incorrect." });
+        return callback({ success: false, message: "Identifiants incorrects." });
       }
 
-      socket.username = username;
-      onlineUsers.set(username, socket.id);
+      socket.data.username = username;
+      userSockets[username] = socket.id;
+      onlineUsers.add(username);
 
-      // Met à jour le lastSeen à l'instant présent en BDD
       user.lastSeen = Date.now();
       await user.save();
+      broadcastOnlineUsers();
 
-      // Récupération de l'historique des messages de l'utilisateur
       const history = await Message.find({
         $or: [
           { sender: username },
@@ -100,151 +112,151 @@ io.on('connection', (socket) => {
         ]
       }).sort({ timestamp: 1 });
 
-      callback({
-        success: true,
-        ntfyTopic: user.ntfyTopic,
-        history: history
-      });
-
-      broadcastOnlineUsers();
+      callback({ success: true, history, ntfyTopic: user.ntfyTopic });
     } catch (err) {
-      callback({ success: false, message: "Erreur serveur lors de la connexion." });
+      callback({ success: false, message: "Erreur lors de la connexion." });
     }
   });
 
-  // --- MISE À JOUR DU CANAL NTFY ---
-  socket.on('update-ntfy', async ({ ntfyTopic }) => {
-    if (!socket.username) return;
-    try {
-      await User.updateOne({ username: socket.username }, { $set: { ntfyTopic } });
-      socket.emit('update-ntfy-response', { success: true });
-    } catch (err) {
-      socket.emit('update-ntfy-response', { success: false });
-    }
-  });
-
-  // --- ENVOI D'UN MESSAGE ---
-  socket.on('send-message', async ({ recipient, text, type }, callback) => {
-    if (!socket.username) return;
-
-    const sender = socket.username;
-    const timestamp = Date.now();
-    // Si le destinataire est déjà connecté et lit la conv, on peut l'initialiser à lu ou non
-    const isRecipientActive = onlineUsers.has(recipient);
-    
-    try {
-      const newMessage = new Message({
-        sender,
-        recipient,
-        text,
-        type: type || 'text',
-        timestamp,
-        read: false
-      });
-      await newMessage.save();
-
-      // Renvoie le succès avec le timestamp au client expéditeur
-      callback({ success: true, timestamp });
-
-      // Transmet le message au destinataire s'il est en ligne
-      if (recipient === 'patchnote') {
-        io.emit('new-message', { sender, recipient, text, type, timestamp, read: false });
-      } else if (onlineUsers.has(recipient)) {
-        io.to(onlineUsers.get(recipient)).emit('new-message', {
-          sender,
-          recipient,
-          text,
-          type,
-          timestamp,
-          read: false
-        });
-      } else {
-        // Le destinataire est hors-ligne -> Envoi de la notification push Ntfy si configuré
-        const recipientUser = await User.findOne({ username: recipient });
-        if (recipientUser && recipientUser.ntfyTopic) {
-          const fetch = (await import('node-fetch')).default;
-          let previewText = text;
-          if (type === 'image') previewText = "a envoyé une photo 📷";
-          else if (type === 'audio') previewText = "a envoyé un message vocal 🎤";
-
-          await fetch(`https://ntfy.sh/${recipientUser.ntfyTopic}`, {
-            method: 'POST',
-            body: `${sender}: ${previewText}`,
-            headers: {
-              'Title': 'Nouveau message privé',
-              'Priority': 'default'
-            }
-          }).catch(err => console.error("Erreur d'envoi Ntfy :", err));
-        }
-      }
-    } catch (err) {
-      callback({ success: false, message: "Erreur lors de l'enregistrement du message." });
-    }
-  });
-
-  // --- MARQUER LES MESSAGES COMME LUS (ACCUSÉ DE LECTURE "VU") ---
-  socket.on('mark-read', async ({ sender }) => {
-    if (!socket.username) return;
-    try {
-      // Met à jour les messages non lus envoyés par 'sender' à l'utilisateur actuel
-      await Message.updateMany(
-        { sender: sender, recipient: socket.username, read: false },
-        { $set: { read: true } }
-      );
-
-      // Si l'expéditeur est en ligne, on l'informe en direct que ses messages ont été lus
-      if (onlineUsers.has(sender)) {
-        io.to(onlineUsers.get(sender)).emit('messages-read', { reader: socket.username });
-      }
-    } catch (err) {
-      console.error("Erreur lors de la mise à jour des messages lus :", err);
-    }
-  });
-
-  // --- GESTION DE LA PRÉSENCE (Actif / Inactif) ---
+  // Gestion de l'inactivité / présence
   socket.on('user-active', async () => {
-    if (socket.username) {
-      onlineUsers.set(socket.username, socket.id);
-      await User.updateOne({ username: socket.username }, { $set: { lastSeen: Date.now() } });
-      broadcastOnlineUsers();
+    const username = socket.data.username;
+    if (username) {
+      userSockets[username] = socket.id;
+      if (!onlineUsers.has(username)) {
+        onlineUsers.add(username);
+        await User.updateOne({ username }, { lastSeen: Date.now() });
+        broadcastOnlineUsers();
+      }
     }
   });
 
   socket.on('user-inactive', async () => {
-    if (socket.username) {
-      onlineUsers.delete(socket.username);
+    const username = socket.data.username;
+    if (username && userSockets[username] === socket.id) {
+      delete userSockets[username];
+      onlineUsers.delete(username);
       const now = Date.now();
-      await User.updateOne({ username: socket.username }, { $set: { lastSeen: now } });
+      await User.updateOne({ username }, { lastSeen: now });
       broadcastOnlineUsers();
     }
   });
 
-  // --- INDICATEUR DE SAISIE ---
+  // Indicateur de saisie ("En train d'écrire...")
   socket.on('typing', ({ recipient }) => {
-    if (socket.username && onlineUsers.has(recipient)) {
-      io.to(onlineUsers.get(recipient)).emit('user-typing', { sender: socket.username });
+    const sender = socket.data.username;
+    const recipientSocketId = userSockets[recipient];
+    if (recipientSocketId) {
+      io.to(recipientSocketId).emit('user-typing', { sender });
     }
   });
 
   socket.on('stop-typing', ({ recipient }) => {
-    if (socket.username && onlineUsers.has(recipient)) {
-      io.to(onlineUsers.get(recipient)).emit('user-stop-typing', { sender: socket.username });
+    const sender = socket.data.username;
+    const recipientSocketId = userSockets[recipient];
+    if (recipientSocketId) {
+      io.to(recipientSocketId).emit('user-stop-typing', { sender });
     }
   });
 
-  // --- DÉCONNEXION ---
+  socket.on('update-ntfy', async ({ ntfyTopic }, callback) => {
+    const username = socket.data.username;
+    if (!username) return callback({ success: false, message: "Non authentifié" });
+    try {
+      await User.updateOne({ username }, { ntfyTopic });
+      callback({ success: true });
+    } catch (err) {
+      callback({ success: false, message: "Erreur mise à jour ntfy" });
+    }
+  });
+
+  // --- ACCUSÉ DE LECTURE ("VU") ---
+  socket.on('mark-read', async ({ sender }) => {
+    const username = socket.data.username;
+    if (!username) return;
+    try {
+      // Marque comme lus les messages reçus de cet expéditeur
+      await Message.updateMany(
+        { sender: sender, recipient: username, read: false },
+        { $set: { read: true } }
+      );
+
+      // Si l'expéditeur est en ligne, on l'informe en direct
+      const senderSocketId = userSockets[sender];
+      if (senderSocketId) {
+        io.to(senderSocketId).emit('messages-read', { reader: username });
+      }
+    } catch (err) {
+      console.error("Erreur mark-read:", err);
+    }
+  });
+
+  socket.on('send-message', async ({ recipient, text, type }, callback) => {
+    try {
+      const sender = socket.data.username || Object.keys(userSockets).find(user => userSockets[user] === socket.id);
+      if (!sender) return callback({ success: false, message: "Non authentifié." });
+
+      const msgType = type || 'text';
+
+      if (recipient === 'patchnote') {
+        const allowedAdmins = ['Wifmat', 'Vortex'];
+        if (!allowedAdmins.some(admin => admin.toLowerCase() === sender.toLowerCase())) {
+          return callback({ success: false, message: "Seuls Wifmat et Vortex peuvent écrire dans les patchnotes." });
+        }
+      }
+
+      const newMsg = new Message({ sender, recipient, text, type: msgType, read: false });
+      await newMsg.save();
+
+      const messagePayload = { 
+        sender, 
+        recipient: recipient === 'patchnote' ? 'patchnote' : sender, 
+        text, 
+        type: msgType, 
+        timestamp: newMsg.timestamp,
+        read: false 
+      };
+
+      // Renvoie le timestamp pour l'affichage dynamique côté client
+      callback({ success: true, timestamp: newMsg.timestamp });
+
+      if (recipient === 'patchnote') {
+        io.emit('new-message', { ...messagePayload, recipient: 'patchnote' });
+        
+        const usersWithNtfy = await User.find({ ntfyTopic: { $ne: "" } });
+        usersWithNtfy.forEach(u => {
+          if (u.username !== sender) {
+            sendNtfyAlert(u.ntfyTopic, "Nouveau patchnote", `${sender} a publié un patchnote.`);
+          }
+        });
+      } else {
+        const recipientSocketId = userSockets[recipient];
+        if (recipientSocketId) {
+          io.to(recipientSocketId).emit('new-message', messagePayload);
+        } else {
+          const recipientUser = await User.findOne({ username: recipient });
+          if (recipientUser && recipientUser.ntfyTopic) {
+            let previewText = msgType === 'image' ? '[Photo]' : (msgType === 'audio' ? '[Message vocal]' : text);
+            sendNtfyAlert(recipientUser.ntfyTopic, `Message de @${sender}`, `${sender} : "${previewText}"`);
+          }
+        }
+      }
+    } catch (err) {
+      callback({ success: false, message: "Erreur d'envoi." });
+    }
+  });
+
   socket.on('disconnect', async () => {
-    console.log(`Socket déconnecté : ${socket.id}`);
-    if (socket.username) {
-      onlineUsers.delete(socket.username);
+    const username = socket.data.username;
+    if (username) {
+      delete userSockets[username];
+      onlineUsers.delete(username);
       const now = Date.now();
-      await User.updateOne({ username: socket.username }, { $set: { lastSeen: now } });
+      await User.updateOne({ username }, { lastSeen: now });
       broadcastOnlineUsers();
     }
   });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Serveur démarré sur le port ${PORT}`);
-});
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, () => console.log(`Serveur actif sur le port ${PORT}`));
