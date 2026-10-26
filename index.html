@@ -614,8 +614,8 @@
     function handleTypingInput() {
       if (!activeRecipient || activeRecipient === 'patchnote') return;
 
-      // Taper du texte signifie que l'utilisateur est actif (relance le timer de 5 sec)
-      resetInactivityTimer();
+      // Pendant la rédaction, le délai passe à 15 secondes
+      resetInactivityTimer(15000);
 
       if (!isTyping) {
         isTyping = true;
@@ -659,10 +659,10 @@
       }
     });
 
-    // --- GESTION DE L'INACTIVITÉ (5 SECONDES) ---
+    // --- GESTION DE L'INACTIVITÉ (5s normal / 15s pendant l'écriture) ---
     let inactivityTimer;
 
-    function resetInactivityTimer() {
+    function resetInactivityTimer(delay = 5000) {
       clearTimeout(inactivityTimer);
       if (socket.connected) {
         socket.emit('user-active');
@@ -672,13 +672,21 @@
         if (socket.connected) {
           socket.emit('user-inactive');
         }
-      }, 5000);
+      }, delay);
     }
 
-    window.addEventListener('mousemove', resetInactivityTimer);
-    window.addEventListener('keypress', resetInactivityTimer);
-    window.addEventListener('click', resetInactivityTimer);
-    window.addEventListener('touchstart', resetInactivityTimer);
+    window.addEventListener('mousemove', () => resetInactivityTimer(5000));
+    window.addEventListener('keypress', (e) => {
+      // Si on tape dans l'input de message, on met 15 secondes, sinon 5 secondes
+      const messageInput = document.getElementById('message-input');
+      if (document.activeElement === messageInput) {
+        resetInactivityTimer(15000);
+      } else {
+        resetInactivityTimer(5000);
+      }
+    });
+    window.addEventListener('click', () => resetInactivityTimer(5000));
+    window.addEventListener('touchstart', () => resetInactivityTimer(5000));
   </script>
 </body>
 </html>
