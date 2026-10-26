@@ -168,13 +168,12 @@
     let isLoginMode = true;
     let activeRecipient = null;
     const chats = { 'patchnote': [] };
-    const unreadCounts = {}; // Compteurs de messages non lus par conversation
+    const unreadCounts = {}; 
     const onlineUsersList = new Set();
 
     let typingTimeout;
     let isTyping = false;
 
-    // Gestion enregistrement vocal
     let mediaRecorder;
     let audioChunks = [];
     let isRecording = false;
@@ -610,12 +609,8 @@
       }
     }
 
-    // --- INDICATEUR DE SAISIE & ACTIVITÉ LORS DE LA RÉDACTION ---
     function handleTypingInput() {
       if (!activeRecipient || activeRecipient === 'patchnote') return;
-
-      // Pendant la rédaction, le délai passe à 15 secondes
-      resetInactivityTimer(15000);
 
       if (!isTyping) {
         isTyping = true;
@@ -659,34 +654,18 @@
       }
     });
 
-    // --- GESTION DE L'INACTIVITÉ (5s normal / 15s pendant l'écriture) ---
-    let inactivityTimer;
+    // --- GESTION DE LA VISIBILITÉ (Premier plan / Second plan) ---
+    document.addEventListener("visibilitychange", () => {
+      if (!socket.connected) return;
 
-    function resetInactivityTimer(delay = 5000) {
-      clearTimeout(inactivityTimer);
-      if (socket.connected) {
+      if (document.visibilityState === "visible") {
+        // L'utilisateur revient sur l'application (Premier plan) -> En ligne
         socket.emit('user-active');
-      }
-
-      inactivityTimer = setTimeout(() => {
-        if (socket.connected) {
-          socket.emit('user-inactive');
-        }
-      }, delay);
-    }
-
-    window.addEventListener('mousemove', () => resetInactivityTimer(5000));
-    window.addEventListener('keypress', (e) => {
-      // Si on tape dans l'input de message, on met 15 secondes, sinon 5 secondes
-      const messageInput = document.getElementById('message-input');
-      if (document.activeElement === messageInput) {
-        resetInactivityTimer(15000);
       } else {
-        resetInactivityTimer(5000);
+        // L'utilisateur quitte l'onglet ou l'application mobile (Second plan) -> Hors ligne pour ntfy
+        socket.emit('user-inactive');
       }
     });
-    window.addEventListener('click', () => resetInactivityTimer(5000));
-    window.addEventListener('touchstart', () => resetInactivityTimer(5000));
   </script>
 </body>
 </html>
