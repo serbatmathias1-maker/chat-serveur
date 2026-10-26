@@ -422,7 +422,7 @@
       const msgTime = timestamp ? new Date(timestamp) : new Date();
       const time = msgTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       
-      chats[targetKey].push({ 
+      const messageObj = { 
         sender, 
         text, 
         type: type || 'text', 
@@ -430,14 +430,113 @@
         time, 
         timestamp: msgTime.getTime(), 
         read: read !== undefined ? read : (isMe ? false : (activeRecipient === targetKey)) 
-      });
+      };
+
+      chats[targetKey].push(messageObj);
 
       if (sender !== currentUser && activeRecipient !== targetKey) {
         unreadCounts[targetKey] = (unreadCounts[targetKey] || 0) + 1;
       }
       
-      if (activeRecipient === targetKey) renderMessages();
+      // Si on est dans la conv active, on ajoute proprement le message avec l'animation sans tout recharger
+      if (activeRecipient === targetKey) {
+        appendMessageDOM(messageObj);
+      }
+
       renderConversationsList();
+    }
+
+    // Fonction dédiée pour ajouter un seul message dans le DOM avec l'animation
+    function appendMessageDOM(msg) {
+      const chatBox = document.getElementById('chat-box');
+      
+      // Supprime le message "C'est le début de cette discussion" si présent
+      const emptyState = document.getElementById('no-chat-selected');
+      if (emptyState && chatBox.contains(emptyState)) {
+        chatBox.innerHTML = "";
+      }
+
+      const wrapper = document.createElement('div');
+      wrapper.className = `flex flex-col ${msg.isMe ? 'items-end' : 'items-start'} animate-message`;
+
+      const bubble = document.createElement('div');
+      bubble.className = `max-w-[80%] rounded-2xl px-4 py-2 text-xs shadow-md transition-all break-words-custom ${
+        msg.isMe ? 'bg-emerald-500 text-slate-950 rounded-br-none font-medium' : 'bg-slate-900 border border-slate-800 text-slate-100 rounded-bl-none'
+      }`;
+
+      if (activeRecipient === 'patchnote' && !msg.isMe) {
+        const authorDiv = document.createElement('div');
+        authorDiv.className = 'text-[10px] font-bold text-emerald-400 mb-0.5';
+        authorDiv.innerText = msg.sender;
+        bubble.appendChild(authorDiv);
+      }
+
+      if (msg.type === 'image') {
+        const img = document.createElement('img');
+        img.src = msg.text;
+        img.className = 'rounded-lg max-h-48 object-cover cursor-pointer mt-1 mb-1 hover:opacity-95 transition-opacity';
+        img.onclick = () => window.open(msg.text);
+        bubble.appendChild(img);
+      } else if (msg.type === 'audio') {
+        const audio = document.createElement('audio');
+        audio.src = msg.text;
+        audio.controls = true;
+        audio.className = 'max-w-full h-8 mt-1 mb-1';
+        bubble.appendChild(audio);
+      } else {
+        const textDiv = document.createElement('div');
+        textDiv.innerText = msg.text;
+        bubble.appendChild(textDiv);
+      }
+
+      const footerDiv = document.createElement('div');
+      footerDiv.className = `text-[9px] mt-1 flex items-center justify-end space-x-1 ${msg.isMe ? 'text-slate-800' : 'text-slate-500'}`;
+      
+      const timeSpan = document.createElement('span');
+      timeSpan.innerText = msg.time;
+      footerDiv.appendChild(timeSpan);
+
+      if (msg.isMe && activeRecipient !== 'patchnote') {
+        const readSpan = document.createElement('span');
+        readSpan.className = "ml-1 font-bold transition-all";
+        if (msg.read) {
+          readSpan.innerText = "✓✓ Vu";
+          readSpan.className += " text-slate-900";
+        } else {
+          readSpan.innerText = "✓ Envoyé";
+          readSpan.className += " text-slate-700";
+        }
+        footerDiv.appendChild(readSpan);
+      }
+
+      bubble.appendChild(footerDiv);
+      wrapper.appendChild(bubble);
+      chatBox.appendChild(wrapper);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function renderMessages() {
+      const chatBox = document.getElementById('chat-box');
+      chatBox.innerHTML = "";
+
+      if (!activeRecipient || !chats[activeRecipient]) return;
+
+      const msgs = chats[activeRecipient];
+
+      if (msgs.length === 0) {
+        chatBox.innerHTML = `
+          <div class="h-full flex flex-col items-center justify-center text-slate-600 space-y-1 animate-message" id="no-chat-selected">
+            <p class="text-xs">C'est le début de cette discussion</p>
+            <p class="text-[10px]">Envoyez votre premier message !</p>
+          </div>
+        `;
+        return;
+      }
+
+      // Quand on charge toute la conv (ex: en changeant de salon), on affiche tout d'un coup sans recréer le bug
+      msgs.forEach(msg => {
+        appendMessageDOM(msg);
+      });
     }
 
     function renderConversationsList() {
@@ -512,87 +611,6 @@
         `;
         listEl.appendChild(btn);
       });
-    }
-
-    function renderMessages() {
-      const chatBox = document.getElementById('chat-box');
-      chatBox.innerHTML = "";
-
-      if (!activeRecipient || !chats[activeRecipient]) return;
-
-      const msgs = chats[activeRecipient];
-
-      if (msgs.length === 0) {
-        chatBox.innerHTML = `
-          <div class="h-full flex flex-col items-center justify-center text-slate-600 space-y-1 animate-message">
-            <p class="text-xs">C'est le début de cette discussion</p>
-            <p class="text-[10px]">Envoyez votre premier message !</p>
-          </div>
-        `;
-        return;
-      }
-
-      msgs.forEach(msg => {
-        const wrapper = document.createElement('div');
-        wrapper.className = `flex flex-col ${msg.isMe ? 'items-end' : 'items-start'} animate-message`;
-
-        const bubble = document.createElement('div');
-        // Ajout de max-w-[80%] et break-words-custom pour forcer le retour à la ligne
-        bubble.className = `max-w-[80%] rounded-2xl px-4 py-2 text-xs shadow-md transition-all break-words-custom ${
-          msg.isMe ? 'bg-emerald-500 text-slate-950 rounded-br-none font-medium' : 'bg-slate-900 border border-slate-800 text-slate-100 rounded-bl-none'
-        }`;
-
-        if (activeRecipient === 'patchnote' && !msg.isMe) {
-          const authorDiv = document.createElement('div');
-          authorDiv.className = 'text-[10px] font-bold text-emerald-400 mb-0.5';
-          authorDiv.innerText = msg.sender;
-          bubble.appendChild(authorDiv);
-        }
-
-        if (msg.type === 'image') {
-          const img = document.createElement('img');
-          img.src = msg.text;
-          img.className = 'rounded-lg max-h-48 object-cover cursor-pointer mt-1 mb-1 hover:opacity-95 transition-opacity';
-          img.onclick = () => window.open(msg.text);
-          bubble.appendChild(img);
-        } else if (msg.type === 'audio') {
-          const audio = document.createElement('audio');
-          audio.src = msg.text;
-          audio.controls = true;
-          audio.className = 'max-w-full h-8 mt-1 mb-1';
-          bubble.appendChild(audio);
-        } else {
-          const textDiv = document.createElement('div');
-          textDiv.innerText = msg.text;
-          bubble.appendChild(textDiv);
-        }
-
-        const footerDiv = document.createElement('div');
-        footerDiv.className = `text-[9px] mt-1 flex items-center justify-end space-x-1 ${msg.isMe ? 'text-slate-800' : 'text-slate-500'}`;
-        
-        const timeSpan = document.createElement('span');
-        timeSpan.innerText = msg.time;
-        footerDiv.appendChild(timeSpan);
-
-        if (msg.isMe && activeRecipient !== 'patchnote') {
-          const readSpan = document.createElement('span');
-          readSpan.className = "ml-1 font-bold transition-all";
-          if (msg.read) {
-            readSpan.innerText = "✓✓ Vu";
-            readSpan.className += " text-slate-900";
-          } else {
-            readSpan.innerText = "✓ Envoyé";
-            readSpan.className += " text-slate-700";
-          }
-          footerDiv.appendChild(readSpan);
-        }
-
-        bubble.appendChild(footerDiv);
-        wrapper.appendChild(bubble);
-        chatBox.appendChild(wrapper);
-      });
-
-      chatBox.scrollTop = chatBox.scrollHeight;
     }
 
     async function sendMessage(e) {
